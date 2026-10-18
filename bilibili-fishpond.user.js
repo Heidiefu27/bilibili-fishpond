@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         2.9.2
+// @version         3.0.0
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -42,7 +42,7 @@
    * 0. 配置
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '2.9.2';
+  const VERSION = '3.0.0';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -640,7 +640,6 @@
   }
 
   function scanProgress(txt) {
-    scanLabel(txt);
     toast(txt);
   }
 
@@ -723,17 +722,10 @@
     return REPLIES.size - start;
   }
 
-  let scanLabelTimer = 0;
-  function scanLabel(txt) {
-    if (!pondEl || !pondEl.__scanBtn) return;
-    pondEl.__scanBtn.textContent = txt;
-  }
-
   async function scanAll() {
     if (scanning) { scanAbort = true; return; }
     scanning = true;
     scanAbort = false;
-    if (pondEl && pondEl.__scanBtn) pondEl.__scanBtn.textContent = '扫描中…';
     const start = REPLIES.size;
     let added = 0;
     try {
@@ -758,7 +750,6 @@
       renderPond(true);
       updateTabCount();
       try { syncNativeDom(); } catch (e) {}
-      if (pondEl && pondEl.__scanBtn) pondEl.__scanBtn.textContent = '扫全部';
       toast(added ? '扫描完成：新增 ' + added + ' 条（鱼塘 ' + AI.size + ' 条）' : '扫描完成：没有新增');
     }
   }
@@ -988,33 +979,6 @@
   const POND_CSS = `
   .fp-pond { color: inherit; font-family: inherit; padding: 0 0 24px; }
   .fp-pond[hidden] { display: none !important; }
-  .fp-pond-bar {
-    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-    padding: 10px 2px; margin-bottom: 4px;
-    border-bottom: 1px solid rgba(128,136,153,.22);
-    font-size: 13px;
-  }
-  .fp-pond-title { font-weight: 700; font-size: 14px; display: inline-flex; align-items: center; gap: 6px; }
-  .fp-pond-title i {
-    font-style: normal; font-size: 11px; line-height: 17px; min-width: 18px;
-    padding: 0 6px; border-radius: 9px; background: rgba(248,90,84,.16);
-    color: #F85A54; text-align: center;
-  }
-  .fp-spacer { flex: 1 1 auto; }
-  .fp-search {
-    height: 28px; width: 168px; padding: 0 10px; font-size: 12.5px;
-    border-radius: 14px; border: 1px solid rgba(128,136,153,.35);
-    background: rgba(128,136,153,.10); color: inherit; outline: none; font-family: inherit;
-  }
-  .fp-search::placeholder { color: inherit; opacity: .45; }
-  .fp-search:focus { border-color: #00AEEC; }
-  .fp-mini {
-    height: 28px; padding: 0 11px; font-size: 12.5px; cursor: pointer;
-    border-radius: 14px; border: 1px solid rgba(128,136,153,.35);
-    background: rgba(128,136,153,.10); color: inherit; font-family: inherit;
-  }
-  .fp-mini:hover { border-color: #00AEEC; color: #00AEEC; }
-  .fp-scaninfo { font-size: 11.5px; opacity: .45; padding: 2px 2px 8px; line-height: 1.6; }
 
   .fp-card { display: flex; gap: 12px; padding: 16px 2px; border-bottom: 1px solid rgba(128,136,153,.16); }
   .fp-card:hover { background: rgba(128,136,153,.05); }
@@ -1059,7 +1023,9 @@
   }
   .fp-reply-av img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .fp-reply-who { color: #00AEEC; margin-right: 6px; text-decoration: none; cursor: pointer; }
-  .fp-uname { text-decoration: none; cursor: pointer; }
+  .fp-reply-who:hover { text-decoration: underline; }
+  .fp-uname { text-decoration: none; cursor: pointer; color: inherit; }
+  .fp-uname:hover { color: #00AEEC; }
   .fp-ucard {
     display: none; position: absolute; z-index: 99999;
     background: #22252B; color: #E3E5E7; border: 1px solid rgba(148,158,178,.25);
@@ -1263,50 +1229,10 @@
     el.className = 'fp-pond';
     el.hidden = true;
 
-    const bar = document.createElement('div');
-    bar.className = 'fp-pond-bar';
-
-    const title = document.createElement('span');
-    title.className = 'fp-pond-title';
-    title.innerHTML = iconTag('fp-icon-title') + ' 鱼塘 <i>0</i>';
-
-    const spacer = document.createElement('span');
-    spacer.className = 'fp-spacer';
-
-    const search = document.createElement('input');
-    search.className = 'fp-search';
-    search.placeholder = '搜正文 / UP主';
-    search.addEventListener('input', () => { searchKW = search.value.trim(); renderPond(true); });
-
-    const scanBtn = document.createElement('button');
-    scanBtn.className = 'fp-mini';
-    scanBtn.dataset.act = 'scan';
-    scanBtn.textContent = '扫全部';
-    scanBtn.title = '翻页扫描该视频的全部评论';
-
-    const sortBtn = document.createElement('button');
-    sortBtn.className = 'fp-mini';
-    sortBtn.dataset.act = 'sort';
-    sortBtn.textContent = CFG.sort === 'time' ? '时间↓' : '分数↓';
-
-    const exitBtn = document.createElement('button');
-    exitBtn.className = 'fp-mini';
-    exitBtn.dataset.act = 'exit';
-    exitBtn.textContent = '← 回到全部评论';
-
-    bar.append(title, spacer, search, scanBtn, sortBtn, exitBtn);
-
-    const info = document.createElement('div');
-    info.className = 'fp-scaninfo';
-
     pondListEl = document.createElement('div');
     pondListEl.className = 'fp-pond-list';
 
-    el.append(bar, info, pondListEl);
-    el.__title = title;
-    el.__sortBtn = sortBtn;
-    el.__scanBtn = scanBtn;
-    el.__info = info;
+    el.append(pondListEl);
     el.addEventListener('click', onPondClick);
     el.addEventListener('mouseover', onPondOver);
     el.addEventListener('mouseleave', () => scheduleHideUserCard());
@@ -1318,10 +1244,6 @@
     for (const rpid of AI) {
       const rec = REPLIES.get(rpid);
       if (!rec) continue;
-      if (searchKW) {
-        const kw = searchKW.toLowerCase();
-        if (!(rec.message.toLowerCase().includes(kw) || (rec.uname || '').toLowerCase().includes(kw))) continue;
-      }
       out.push(rec);
     }
     out.sort((a, b) => {
@@ -1335,63 +1257,29 @@
     return out;
   }
 
-  /** 统计：扫到多少、收了多少、各条规则各放过了多少（用于鱼塘页那行说明） */
-  let scanTotalSeen = 0;
-  function summarize() {
-    const out = { total: REPLIES.size, pond: AI.size, suspect: 0, atup: 0, noat: 0, low: 0, apiTotal: scanTotal || 0 };
-    const upMid = VIP.upMid || detectUp();
-    for (const [, rec] of REPLIES) {
-      if (AI.has(rec.rpid)) continue;
-      const q = /^\s*回复\s*@\s*([^\s:：]{1,24})\s*[:：]\s*/.exec(rec.message || '');
-      const body = q ? rec.message.slice(q[0].length) : (rec.message || '');
-      if (upMid && ((rec.ats || []).indexOf(String(upMid)) !== -1 || (VIP.upName && body.indexOf('@' + VIP.upName) !== -1))) { out.atup++; continue; }
-      if (CFG.requireAt && !RE_AT.test(body)) { out.noat++; continue; }
-      out.low++;
-    }
-    try { out.suspect = [...AI].filter((rpid) => { const r = REPLIES.get(rpid); return r && isSuspect(r); }).length; } catch (e) {}
-    return out;
-  }
-
   function renderPond(force) {
-    if (!pondEl || !pondListEl) return;
-    updatePondTitle();
-    // 注意不要把 REPLIES.size 放进签名：拉取子回复会让它变大，
-    // 导致整页重渲染、把已展开的回复和按钮节点都换掉
-    const sig = AI.size + '|' + searchKW + '|' + CFG.sort + '|' + (scanTotal || 0);
+    if (!pondEl) return;
+    const sig = AI.size + '|' + CFG.sort + '|' + (scanTotal || 0);
     if (!force && sig === pondSig) return;
     pondSig = sig;
-
-    if (pondEl.__info) {
-      const st = summarize();
-      const parts = ['扫到 ' + st.total + ' 条'];
-      if (st.apiTotal && st.total < st.apiTotal * 0.8) parts.push('（该视频共 ' + st.apiTotal + ' 条，接口只给了这些，点「扫全部」可再试）');
-      parts.push('鱼塘 ' + st.pond);
-      if (st.suspect) parts.push('其中疑似 ' + st.suspect + ' 条（已置顶）');
-      const ex = [];
-      if (st.atup) ex.push('@UP 放过 ' + st.atup);
-      if (st.noat) ex.push('没@ 放过 ' + st.noat);
-      if (ex.length) parts.push(ex.join(' · '));
-      pondEl.__info.textContent = parts.join(' · ');
-    }
 
     const list = currentList();
     const frag = document.createDocumentFragment();
     if (!list.length) {
       const empty = document.createElement('div');
       empty.className = 'fp-empty';
-      empty.innerHTML = searchKW
-        ? '没搜到。<br>换个关键词试试？'
-        : iconTag() + ' 这里还没有鱼<br>这页评论区暂时没发现带 <b>@</b> 的 AI/推广评论';
+      empty.innerHTML = scanTotal && REPLIES.size < scanTotal * 0.8
+        ? '这页还没发现带 <b>@</b> 的 AI/推广评论<br><br>只扫到了 <b>' + REPLIES.size + '</b> / ' + scanTotal + ' 条（接口限制），可以点页签旁边的「扫全部」再试'
+        : '这页没发现带 <b>@</b> 的 AI/推广评论';
       frag.appendChild(empty);
     } else {
       for (const rec of list) frag.appendChild(renderCard(rec));
     }
-    pondListEl.textContent = '';
+    pondListEl.innerHTML = '';
     pondListEl.appendChild(frag);
   }
 
-  /** 某条评论已有的子回复（按时间正序） */
-  // 子回复接口不返回 IP 属地，用同一作者的其它评论补
+
   function rememberLoc(rec) {
     if (rec && rec.mid && rec.location) MID_LOC.set(String(rec.mid), rec.location);
   }
@@ -1789,12 +1677,6 @@
     return card;
   }
 
-  function updatePondTitle() {
-    if (!pondEl || !pondEl.__title) return;
-    const n = pondEl.__title.querySelector('i');
-    if (n) n.textContent = AI.size;
-  }
-
   function onPondOver(e) {
     if (!e.target || !e.target.closest) return;
     const el = e.target.closest('[data-act="user"]');
@@ -1818,11 +1700,6 @@
       const id = actEl.dataset.for || (actEl.closest('.fp-card') || {}).dataset && actEl.closest('.fp-card').dataset.rpid;
       if (id) toggleReplies(id);
       return;
-    }
-    if (act === 'sort') {
-      CFG.sort = CFG.sort === 'time' ? 'score' : 'time';
-      pondEl.__sortBtn.textContent = CFG.sort === 'time' ? '时间↓' : '分数↓';
-      renderPond(true);
     }
   }
 
@@ -2027,6 +1904,18 @@
       e.stopPropagation();
       togglePond();
     });
+    // 点原生的「最热 / 最新」也退回全部评论
+    try {
+      const sorter = anchor.parentNode;
+      if (sorter && !sorter.__fpSortBound) {
+        sorter.__fpSortBound = true;
+        sorter.addEventListener('click', (ev) => {
+          const t = ev.target;
+          if (t && t.closest && t.closest('.fp-tab')) return;   // 点鱼塘页签不算
+          if (pondOn) setPond(false);
+        }, true);
+      }
+    } catch (e) {}
     return btn;
   }
 
@@ -2043,7 +1932,7 @@
         badge.classList.toggle('zero', AI.size === 0);
       }
     }
-    updatePondTitle();
+
   }
 
   function ensureTab() {
@@ -2486,6 +2375,7 @@
           rec.hits = ev.hits;
           return { score: ev.score, hits: ev.hits, at: RE_AT.test(rec.message), ai: judge(rec) };
         },
+        scan: () => scanAll(),
         open: () => setPond(true),
         close: () => setPond(false),
       };
