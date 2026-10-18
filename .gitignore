@@ -1,0 +1,21 @@
+# 系统 / 编辑器
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+
+# 依赖 / 构建
+node_modules/
+dist/
+*.log
+
+# 打包产物
+*.zip
+*.crx
+
+# 本地个人配置（别提交你的本地设置或隐私数据）
+*.local.*
+.env
+.env.*
