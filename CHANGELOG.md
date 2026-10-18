@@ -1,5 +1,10 @@
 # 更新日志
 
+## [2.1.1] — 更新源切换到 jsDelivr
+
+- `@downloadURL` / `@updateURL` 改指向 jsDelivr（`cdn.jsdelivr.net/gh/...@main/...`）：raw.githubusercontent 的 CDN 缓存会滞后十几分钟，导致"检查更新"拿到旧版本
+- README 安装段同步（jsDelivr 为主，raw 作备用）
+
 ## [2.1.0] — 换成 DeepSeek 蓝鲸图标
 
 - 页签与鱼塘页标题的 🐟 emoji 换成 DeepSeek 官方蓝鲸 logo（`#4D6BFE`）
