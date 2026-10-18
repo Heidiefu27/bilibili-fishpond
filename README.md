@@ -88,6 +88,8 @@
 
 ## 调试
 
+> 脚本在 Tampermonkey 沙箱里运行，页面全局（`__INITIAL_STATE__`）通过 `unsafeWindow` 读取，调试对象也挂在页面的 `window.__fishpond` 上。
+
 ```js
 __fishpond.diag()                  // 钩子/拦截/剔除/页签状态
 __fishpond.scanned                 // 本页扫到的评论（含分数）

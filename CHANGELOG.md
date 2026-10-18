@@ -1,5 +1,10 @@
 # 更新日志
 
+## [2.8.4] — 修 no-oid（沙箱读不到页面全局）
+
+- **根因**：Tampermonkey 沙箱里 `window` 与页面隔离，`window.__INITIAL_STATE__` 读不到 → 取不到 aid → 展开子回复报 `code=no-oid`
+- 改为统一从 `unsafeWindow`（`PAGE_WIN`）读页面全局：`currentOid()`、`detectUp()` 都修好（UP 主识别也因此更稳）
+- 缓存补存 `rcount / ats / childMids / parent / root`，并给旧缓存记录用当前视频 oid 补齐，避免刷新后删标签、丢回复按钮
 ## [2.8.3] — 疑似标签去掉原因
 
 - 鱼塘卡片只打 `疑似`，不再显示"赞 X / 有 N 条回复"这类原因文字（赞数与回复数仍显示在 meta 行）

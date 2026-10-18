@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         2.8.3
+// @version         2.8.4
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -42,7 +42,7 @@
    * 0. 配置
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '2.8.3';
+  const VERSION = '2.8.4';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -90,7 +90,7 @@
 
   function detectUp() {
     try {
-      const st = window.__INITIAL_STATE__;
+      const st = PAGE_WIN.__INITIAL_STATE__;
       if (st) {
         const up = st.upData || (st.videoData && st.videoData.owner) || null;
         if (up && up.mid) { VIP.upMid = String(up.mid); VIP.upName = String(up.name || ''); }
@@ -559,6 +559,9 @@
    * 2.5 扫描全部评论（wbi 签名分页，失败则驱动页面自己加载）
    * ══════════════════════════════════════════════════════════════ */
 
+  // Tampermonkey 沙箱里 window 是隔离的，页面全局（__INITIAL_STATE__ 等）要从 unsafeWindow 读
+  const PAGE_WIN = (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window;
+
   let scanning = false;
   let scanAbort = false;
   let scanTotal = 0;   // 接口报告的评论总数（all_count）
@@ -628,7 +631,7 @@
   function currentOid() {
     if (NET.oid) return { oid: NET.oid, type: NET.type || '1' };
     try {
-      const st = window.__INITIAL_STATE__;
+      const st = PAGE_WIN.__INITIAL_STATE__;
       if (st && st.aid) return { oid: String(st.aid), type: '1' };
     } catch (e) {}
     return null;
@@ -1147,7 +1150,7 @@
       const rec = {
         rpid: String(raw.rpid),
         message: raw.message,
-        oid: raw.oid || '',
+        oid: raw.oid || (currentOid() && currentOid().oid) || '',
         type: raw.type || '1',
         uname: raw.uname || '未知用户',
         mid: raw.mid || '',
@@ -1156,6 +1159,11 @@
         like: raw.like || 0,
         location: raw.location || '',
         level: raw.level || 0,
+        rcount: raw.rcount || 0,
+        ats: Array.isArray(raw.ats) ? raw.ats : [],
+        childMids: Array.isArray(raw.childMids) ? raw.childMids : [],
+        parent: raw.parent || '',
+        root: raw.root || '',
         score: 0,
         hits: [],
       };
@@ -1181,6 +1189,8 @@
             rpid: rec.rpid, message: rec.message, oid: rec.oid, type: rec.type,
             uname: rec.uname, mid: rec.mid, avatar: rec.avatar, location: rec.location,
             level: rec.level, ctime: rec.ctime, like: rec.like, score: rec.score,
+            rcount: rec.rcount || 0, ats: rec.ats || [], childMids: rec.childMids || [],
+            parent: rec.parent || '', root: rec.root || '',
             hits: rec.hits,
           });
         }
@@ -1361,7 +1371,7 @@
   /** 拉一条评论的楼中楼：三种请求变体依次尝试，失败原因记到 REPLY_FETCH */
   async function fetchReplies(rec, pn) {
     const ctx = currentOid();
-    const oid = String(rec.oid || (ctx && ctx.oid) || '');
+    const oid = String(rec.oid || (ctx && ctx.oid) || (currentOid() || {}).oid || '');
     const type = String(rec.type || (ctx && ctx.type) || '1');
     if (!oid) { REPLY_FETCH.code = 'no-oid'; REPLY_FETCH.msg = '缺少 oid'; return 0; }
 
@@ -2203,7 +2213,6 @@
     // 调试入口（只读）。Tampermonkey 沙箱里 window 是隔离的，
     // 必须挂到 unsafeWindow 才能在页面控制台访问到
     try {
-      const PAGE_WIN = (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window;
       PAGE_WIN.__fishpond = {
         version: VERSION,
         get cfg() { return CFG; },
