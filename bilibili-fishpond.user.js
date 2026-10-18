@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         2.9.0
+// @version         2.9.1
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -42,7 +42,7 @@
    * 0. 配置
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '2.9.0';
+  const VERSION = '2.9.1';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -448,6 +448,7 @@
     rec.hits = ev.hits;
 
     REPLIES.set(rpid, rec);
+    rememberLoc(rec);
     refreshAI(rec);
     return { rec, isAI: AI.has(rpid) };
   }
@@ -564,6 +565,7 @@
 
   let scanning = false;
   let scanAbort = false;
+  const MID_LOC = new Map();   // mid → IP 属地（子回复不返回 location 时用它补）
   let scanTotal = 0;   // 接口报告的评论总数（all_count）
 
   /** 精简 MD5（wbi 签名要用；脚本里没有 Node 的 crypto） */
@@ -1203,6 +1205,7 @@
       rec.score = ev.score;
       rec.hits = ev.hits;
       REPLIES.set(rec.rpid, rec);
+      rememberLoc(rec);
       refreshAI(rec);
     }
     log('缓存恢复', AI.size, '条');
@@ -1388,6 +1391,16 @@
   }
 
   /** 某条评论已有的子回复（按时间正序） */
+  // 子回复接口不返回 IP 属地，用同一作者的其它评论补
+  function rememberLoc(rec) {
+    if (rec && rec.mid && rec.location) MID_LOC.set(String(rec.mid), rec.location);
+  }
+  function locOf(rec) {
+    if (!rec) return '';
+    if (rec.location) { rememberLoc(rec); return rec.location; }
+    return MID_LOC.get(String(rec.mid || '')) || '';
+  }
+
   function childrenOf(rpid) {
     const id = String(rpid);
     const out = [];
@@ -1490,9 +1503,11 @@
 
     const meta = document.createElement('span');
     meta.className = 'fp-reply-meta';
+    const rloc = locOf(r);
     meta.textContent = formatTime(r.ctime)
-      + (r.location ? ' · IP属地：' + r.location : '')
+      + (rloc ? ' · IP属地：' + rloc : '')
       + (r.like ? ' · 👍 ' + r.like : '');
+    if (rloc && !r.location) meta.title = '该回复接口不返回 IP，取自同作者其它评论';
 
     row.append(av, who, txt, meta);
     return row;
