@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         3.1.1
+// @version         3.1.2
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -42,7 +42,7 @@
    * 0. 配置
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '3.1.1';
+  const VERSION = '3.1.2';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -1005,7 +1005,6 @@
   }
   .fp-text { font-size: 14px; line-height: 1.72; white-space: pre-wrap; word-break: break-word; }
   .fp-text.clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; overflow: hidden; }
-  .fp-sus { color: #F85A54; }
   .fp-reply-toggle {
     border: 0; background: none; padding: 0; margin: 0;
     font: inherit; color: #00AEEC; cursor: pointer; opacity: .9;
@@ -1760,12 +1759,6 @@
       mr.textContent = '💬 ' + rec.rcount + ' 条回复';
       mr.title = '展开 / 收起回复';
       meta.appendChild(mr);
-    }
-    if (isSuspect(rec)) {
-      const ms = document.createElement('span');
-      ms.className = 'fp-sus';
-      ms.textContent = '疑似';
-      meta.appendChild(ms);
     }
 
     body.append(top, text, meta);
