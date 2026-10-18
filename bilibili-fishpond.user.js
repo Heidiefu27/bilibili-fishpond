@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         2.1.5
+// @version         2.2.0
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -41,7 +41,7 @@
    * 0. 配置
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '2.1.5';
+  const VERSION = '2.2.0';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -59,6 +59,15 @@
     sort: 'score',      // 鱼塘页排序：score | time
   };
   const CFG = Object.assign({}, DEFAULT_CFG);
+
+  // 扫描全部评论的上限（防止一条视频扫太久）
+  const SCAN_MAX_PAGES = 120;      // 最多 120 页（每页 20 条左右）
+  const SCAN_MAX_REPLIES = 2400;   // 最多收录 2400 条
+  const SCAN_DELAY = 350;          // 每页间隔（毫秒）
+  const WBI_MIXIN = [46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
+    33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61,
+    26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36,
+    20, 34, 44, 52];
 
   // DeepSeek 蓝鲸 logo（内嵌 data URI：脚本不联网也能显示）
   const ICON = 'data:image/png;base64,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';
@@ -370,11 +379,12 @@
     return scoreComment(msg).score >= Number(CFG.threshold || 6);
   }
 
-  const NET = { seen: 0, pruned: 0, urls: new Set(), byMode: {} };
+  const NET = { seen: 0, pruned: 0, urls: new Set(), byMode: {}, oid: '', type: '1' };
 
   function ingestAndPrune(json, url) {
     if (!json || typeof json !== 'object') return 0;
     const ctx = parseCtx(url);
+    if (ctx.oid) { NET.oid = ctx.oid; NET.type = ctx.type || '1'; }
 
     walkReplyTree(json, ctx, 0, true);   // 第一遍：只登记
 
@@ -411,6 +421,186 @@
     } catch (e) {}
     bumpUI();
     return removed;
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+   * 2.5 扫描全部评论（wbi 签名分页，失败则驱动页面自己加载）
+   * ══════════════════════════════════════════════════════════════ */
+
+  let scanning = false;
+  let scanAbort = false;
+
+  /** 精简 MD5（wbi 签名要用；脚本里没有 Node 的 crypto） */
+  function md5Hex(input) {
+    const str = unescape(encodeURIComponent(String(input)));
+    const len = str.length;
+    const words = [];
+    for (let i = 0; i < len; i++) words[i >> 2] |= (str.charCodeAt(i) & 0xff) << ((i % 4) * 8);
+    words[len >> 2] |= 0x80 << ((len % 4) * 8);
+    words[(((len + 8) >> 6) << 4) + 14] = len * 8;
+    const S = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
+    const K = [];
+    for (let i = 0; i < 64; i++) K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 0x100000000) | 0;
+    let a0 = 0x67452301, b0 = 0xefcdab89, c0 = 0x98badcfe, d0 = 0x10325476;
+    for (let i = 0; i < words.length; i += 16) {
+      let a = a0, b = b0, c = c0, d = d0;
+      for (let j = 0; j < 64; j++) {
+        let f, g;
+        if (j < 16) { f = (b & c) | (~b & d); g = j; }
+        else if (j < 32) { f = (d & b) | (~d & c); g = (5 * j + 1) % 16; }
+        else if (j < 48) { f = b ^ c ^ d; g = (3 * j + 5) % 16; }
+        else { f = c ^ (b | ~d); g = (7 * j) % 16; }
+        const tmp = d;
+        d = c; c = b;
+        const sum = (a + f + K[j] + (words[i + g] | 0)) | 0;
+        const sh = S[(j >> 4) * 4 + (j % 4)];
+        b = (b + ((sum << sh) | (sum >>> (32 - sh)))) | 0;
+        a = tmp;
+      }
+      a0 = (a0 + a) | 0; b0 = (b0 + b) | 0; c0 = (c0 + c) | 0; d0 = (d0 + d) | 0;
+    }
+    const hex = (n) => {
+      let out = '';
+      for (let i = 0; i < 4; i++) out += ((n >> (i * 8)) & 0xff).toString(16).padStart(2, '0');
+      return out;
+    };
+    return hex(a0) + hex(b0) + hex(c0) + hex(d0);
+  }
+
+  let wbiCache = { key: '', at: 0 };
+  async function getWbiKey() {
+    if (wbiCache.key && Date.now() - wbiCache.at < 3600 * 1000) return wbiCache.key;
+    const r = await fetch('https://api.bilibili.com/x/web-interface/nav', { credentials: 'include' });
+    const j = await r.json();
+    const img = String(j && j.data && j.data.wbi_img && j.data.wbi_img.img_url || '').split('/').pop().split('.')[0];
+    const sub = String(j && j.data && j.data.wbi_img && j.data.wbi_img.sub_url || '').split('/').pop().split('.')[0];
+    const raw = img + sub;
+    if (!raw) throw new Error('拿不到 wbi key');
+    let key = '';
+    for (const i of WBI_MIXIN) if (i < raw.length) key += raw[i];
+    wbiCache = { key: key.slice(0, 32), at: Date.now() };
+    return wbiCache.key;
+  }
+
+  function wbiQuery(params, mixinKey) {
+    const p2 = Object.assign({}, params, { wts: Math.round(Date.now() / 1000) });
+    const q = Object.keys(p2).sort().map((k) => {
+      const v = String(p2[k]).replace(/[!'()*]/g, '');
+      return encodeURIComponent(k) + '=' + encodeURIComponent(v);
+    }).join('&');
+    return q + '&w_rid=' + md5Hex(q + mixinKey);
+  }
+
+  /** 从已拦到的接口里取 oid/type（页面加载过评论才有） */
+  function currentOid() {
+    if (NET.oid) return { oid: NET.oid, type: NET.type || '1' };
+    try {
+      const st = window.__INITIAL_STATE__;
+      if (st && st.aid) return { oid: String(st.aid), type: '1' };
+    } catch (e) {}
+    return null;
+  }
+
+  function scanProgress(txt) {
+    scanLabel(txt);
+    toast(txt);
+  }
+
+  /** 主路：带 wbi 签名调分页接口 */
+  async function scanByApi() {
+    const ctx = currentOid();
+    if (!ctx) return -1;                     // 没有 oid，交给兜底
+    let key;
+    try { key = await getWbiKey(); } catch (e) { return -1; }
+
+    let offset = '';
+    let pages = 0;
+    let added = 0;
+    while (!scanAbort && pages < SCAN_MAX_PAGES && REPLIES.size < SCAN_MAX_REPLIES) {
+      const q = wbiQuery({
+        oid: ctx.oid,
+        type: ctx.type,
+        mode: 3,
+        pagination_str: JSON.stringify({ offset }),
+        plat: 1,
+        web_location: 1315875,
+      }, key);
+      let json = null;
+      try {
+        const r = await fetch('https://api.bilibili.com/x/v2/reply/wbi/main?' + q, { credentials: 'include' });
+        json = await r.json();
+      } catch (e) { warn('扫描请求失败', e); break; }
+      if (!json || json.code !== 0) { warn('扫描接口返回', json && json.code, json && json.message); break; }
+
+      const before = REPLIES.size;
+      try { walkReplyTree(json, parseCtx('https://api.bilibili.com/x/v2/reply/wbi/main?oid=' + ctx.oid + '&type=' + ctx.type + '&mode=3'), 0, true); } catch (e) {}
+      added += Math.max(0, REPLIES.size - before);
+
+      const cur = json.data && json.data.cursor || {};
+      const total = cur.all_count || 0;
+      pages++;
+      scanProgress('扫描中 ' + pages + ' 页 · 已收 ' + added + ' 条 / 共 ' + total);
+      saveCacheSoon();
+      bumpUI();
+
+      if (cur.is_end) break;
+      const next = cur.pagination_reply && cur.pagination_reply.next;
+      if (!next) { offset = null; break; }   // 匿名/无 token → 交给兜底
+      offset = next;
+      await new Promise((r) => setTimeout(r, SCAN_DELAY));
+    }
+    return offset === null ? -1 : added;
+  }
+
+  /** 兜底：滚动/点击让页面自己加载，我们只负责收接口数据 */
+  async function scanByScroll() {
+    const feed = findFeed();
+    if (!feed) return 0;
+    const start = REPLIES.size;
+    let idle = 0;
+    for (let i = 0; i < 80 && !scanAbort; i++) {
+      const before = REPLIES.size;
+      try {
+        const more = deepQueryOne(commentScope(), '[class*="load-more"], .load-more, .reply-load-more');
+        if (more && more.click) more.click();
+      } catch (e) {}
+      try { feed.lastElementChild && feed.lastElementChild.scrollIntoView({ block: 'end' }); } catch (e) {}
+      try { window.scrollBy(0, 400); } catch (e) {}
+      await new Promise((r) => setTimeout(r, 700));
+      if (REPLIES.size === before) { idle++; if (idle >= 3) break; } else { idle = 0; }
+      scanProgress('滚动加载中 · 已收 ' + (REPLIES.size - start) + ' 条');
+    }
+    return REPLIES.size - start;
+  }
+
+  let scanLabelTimer = 0;
+  function scanLabel(txt) {
+    if (!pondEl || !pondEl.__scanBtn) return;
+    pondEl.__scanBtn.textContent = txt;
+  }
+
+  async function scanAll() {
+    if (scanning) { scanAbort = true; return; }
+    scanning = true;
+    scanAbort = false;
+    if (pondEl && pondEl.__scanBtn) pondEl.__scanBtn.textContent = '扫描中…';
+    const start = REPLIES.size;
+    let added = 0;
+    try {
+      added = await scanByApi();
+      if (added < 0) { scanByScroll(); added = REPLIES.size - start; }
+    } catch (e) {
+      warn('扫描出错', e);
+      try { scanByScroll(); } catch (e2) {}
+      added = REPLIES.size - start;
+    } finally {
+      scanning = false;
+      saveCacheSoon();
+      renderPond(true);
+      updateTabCount();
+      if (pondEl && pondEl.__scanBtn) pondEl.__scanBtn.textContent = '扫全部';
+      toast(added ? '扫描完成：新增 ' + added + ' 条（鱼塘 ' + AI.size + ' 条）' : '扫描完成：没有新增');
+    }
   }
 
   /* ══════════════════════════════════════════════════════════════
@@ -870,6 +1060,12 @@
     search.placeholder = '搜正文 / UP主';
     search.addEventListener('input', () => { searchKW = search.value.trim(); renderPond(true); });
 
+    const scanBtn = document.createElement('button');
+    scanBtn.className = 'fp-mini';
+    scanBtn.dataset.act = 'scan';
+    scanBtn.textContent = '扫全部';
+    scanBtn.title = '翻页扫描该视频的全部评论';
+
     const sortBtn = document.createElement('button');
     sortBtn.className = 'fp-mini';
     sortBtn.dataset.act = 'sort';
@@ -880,7 +1076,7 @@
     exitBtn.dataset.act = 'exit';
     exitBtn.textContent = '← 回到全部评论';
 
-    bar.append(title, spacer, search, sortBtn, exitBtn);
+    bar.append(title, spacer, search, scanBtn, sortBtn, exitBtn);
 
     pondListEl = document.createElement('div');
     pondListEl.className = 'fp-pond-list';
@@ -888,6 +1084,7 @@
     el.append(bar, pondListEl);
     el.__title = title;
     el.__sortBtn = sortBtn;
+    el.__scanBtn = scanBtn;
     el.addEventListener('click', onPondClick);
     return el;
   }
@@ -1005,6 +1202,7 @@
     if (!actEl) return;
     const act = actEl.dataset.act;
     if (act === 'exit') { setPond(false); return; }
+    if (act === 'scan') { scanAll(); return; }
     if (act === 'sort') {
       CFG.sort = CFG.sort === 'time' ? 'score' : 'time';
       pondEl.__sortBtn.textContent = CFG.sort === 'time' ? '时间↓' : '分数↓';
