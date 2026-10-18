@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         2.5.4
+// @version         2.6.0
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -41,7 +41,7 @@
    * 0. 配置
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '2.5.4';
+  const VERSION = '2.6.0';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -383,8 +383,26 @@
     const prev = REPLIES.get(rpid);
     const uname = member.uname || (prev && prev.uname) || '未知用户';
 
-    // 重复请求 / 第二遍剔除：数据没变直接复用
+    // 重复请求 / 第二遍剔除：正文没变时，把会变动的字段（赞/回复数/等级/@）同步过来，
+    // 变了就重新判定一次（点赞涨上去、有回复了都可能改变结论）
     if (prev && prev.message === message && prev.uname === uname) {
+      const like = Number(reply.like) || 0;
+      const rc = Number(reply.rcount != null ? reply.rcount : reply.count) || 0;
+      const lv = pickLevel(reply);
+      const ats = pickAts(reply);
+      const changed = like !== prev.like
+        || rc !== (prev.rcount || 0)
+        || lv !== (prev.level || 0)
+        || (ats && ats.join(',') !== (prev.ats || []).join(','));
+      if (!changed) return { rec: prev, isAI: AI.has(rpid) };
+      prev.like = like;
+      prev.rcount = rc;
+      if (lv) prev.level = lv;
+      if (ats) prev.ats = ats;
+      const ev2 = evaluate(prev);
+      prev.score = ev2.score;
+      prev.hits = ev2.hits;
+      refreshAI(prev);
       return { rec: prev, isAI: AI.has(rpid) };
     }
 
@@ -930,6 +948,15 @@
   }
   .fp-tab-text { display: inline-block; }
   .fp-icon { width: 15px; height: 15px; display: inline-block; vertical-align: -2px; }
+  /* 原评论区里的"疑似鱼但没收录"标记 */
+  .fp-suspect {
+    position: absolute; right: 8px; top: 6px; z-index: 2;
+    font-size: 11px; line-height: 16px; padding: 0 6px; border-radius: 7px;
+    background: rgba(248,90,84,.12); color: #F85A54;
+    border: 1px solid rgba(248,90,84,.35);
+    pointer-events: none; white-space: nowrap; opacity: .9;
+    font-family: inherit;
+  }
   .fp-icon-title { width: 16px; height: 16px; vertical-align: -3px; }
   .fp-tab-count {
     font-style: normal; font-size: 10px; line-height: 14px;
@@ -1700,12 +1727,47 @@
     if (!data) return null;
     const rpid = String(data.rpid || data.rpid_str || '');
     if (!rpid) return null;
-    let rec = REPLIES.get(rpid);
-    if (!rec) {
-      const out = registerReply(data, { oid: '', type: '1' });
-      rec = out && out.rec ? out.rec : REPLIES.get(rpid) || null;
+    // 每次都走 registerReply：正文没变时它会同步赞/回复数等可变字段并重新判定
+    const out = registerReply(data, { oid: '', type: '1' });
+    return (out && out.rec) ? out.rec : (REPLIES.get(rpid) || null);
+  }
+
+  /**
+   * 分数够、但被「赞≥5 / 有回复」放过的评论 —— 标成"疑似鱼"，
+   * 让原评论区里能看见它、也知道它为什么没进鱼塘。
+   */
+  function suspectReason(rec) {
+    if (!rec) return '';
+    if (AI.has(rec.rpid)) return '';                                  // 已收录的不标
+    if (Number(rec.score) < Number(CFG.threshold || 6)) return '';     // 分数不够，不算疑似
+    if (Number(rec.like) >= LIKE_EXEMPT) return '赞 ' + rec.like + ' ≥ ' + LIKE_EXEMPT;
+    if (Number(rec.rcount) > 0) return '有 ' + rec.rcount + ' 条回复';
+    return '';
+  }
+
+  /** 在原评论区那张卡片上挂/更新标记 */
+  function decorateSuspect(el) {
+    if (!el || el.nodeType !== 1) return;
+    if (!CFG.enabled || !CFG.hideNative) return;
+    const data = el.__data || (el.querySelector && (el.querySelector('bili-comment-renderer') || {}).__data);
+    if (!data || !(data.rpid || data.rpid_str)) return;
+    const rec = considerData(data);
+    if (!rec) return;
+    const reason = suspectReason(rec);
+    const existing = el.querySelector('.fp-suspect');
+    if (!reason) { if (existing) existing.remove(); return; }
+    if (existing && existing.dataset.reason === reason) return;
+    injectShadowCSS(el.getRootNode ? el.getRootNode() : null);
+    let badge = existing;
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'fp-suspect';
+      try { if (!el.style.position || el.style.position === 'static') el.style.position = 'relative'; } catch (e) {}
+      el.appendChild(badge);
     }
-    return rec;
+    badge.dataset.reason = reason;
+    badge.textContent = '疑似鱼 · ' + reason;
+    badge.title = '分数 ' + rec.score + '，但' + reason + '，所以没有收进鱼塘';
   }
 
   /** 单张卡片即时判定：命中就当场隐藏（绘制之前） */
@@ -1763,12 +1825,15 @@
 
     let hidden = 0;
     for (const th of deepQueryAll(scope, 'bili-comment-thread-renderer')) {
-      if (th.__data && hideIfAI(th)) hidden++;
+      if (th.__data) {
+        if (hideIfAI(th)) hidden++;
+        else decorateSuspect(th);
+      }
     }
     for (const r of deepQueryAll(scope, 'bili-comment-renderer')) {
       if (!r.__data) continue;
       const rec = considerData(r.__data);
-      if (!rec || !AI.has(rec.rpid)) continue;
+      if (!rec || !AI.has(rec.rpid)) { if (r.__data) decorateSuspect(r); continue; }
       hideCard(r, rec.rpid);
       hidden++;
       try {
@@ -1854,11 +1919,11 @@
       for (const c of inner) hideIfAI(c);
     }
     if (!commentScope()) return;
-    if (isCardEl(node)) hideIfAI(node);
+    if (isCardEl(node)) { hideIfAI(node); decorateSuspect(node); }
     if (!node.querySelectorAll) return;
     let cards = [];
     try { cards = node.querySelectorAll(CARD_SELECTOR); } catch (e) { cards = []; }
-    for (const c of cards) hideIfAI(c);
+    for (const c of cards) { hideIfAI(c); decorateSuspect(c); }
     let hosts = [];
     try { hosts = node.querySelectorAll('bili-comments, bili-comment-thread-renderer, bili-comment-renderer'); } catch (e) { hosts = []; }
     for (const h of hosts) {
@@ -2005,6 +2070,7 @@
             cfg: CFG,
           };
         },
+        judge(rpid) { const r = REPLIES.get(String(rpid)); return r ? judge(r) : null; },
         score: (t) => scoreComment(t),
         verdict: (t, uname) => evaluate({ message: t, uname: uname || '' }),
         check(t, uname, opts) {
