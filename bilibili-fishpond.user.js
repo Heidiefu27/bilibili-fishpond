@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         2.7.0
+// @version         2.8.1
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -42,7 +42,7 @@
    * 0. 配置
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '2.7.0';
+  const VERSION = '2.8.1';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -434,6 +434,8 @@
       ctime: reply.ctime || (prev && prev.ctime) || 0,
       like: reply.like || 0,
       rcount: Number(reply.rcount != null ? reply.rcount : reply.count) || 0,
+      parent: String(reply.parent || reply.parent_str || (prev && prev.parent) || ''),
+      root: String(reply.root || reply.root_str || (prev && prev.root) || ''),
       childMids: pickChildMids(reply),
       location: pickLocation(reply) || (prev && prev.location) || '',
       level: pickLevel(reply) || (prev && prev.level) || 0,
@@ -1031,6 +1033,22 @@
   .fp-text { font-size: 14px; line-height: 1.72; white-space: pre-wrap; word-break: break-word; }
   .fp-text.clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; overflow: hidden; }
   .fp-sus { color: #F85A54; }
+  .fp-reply-toggle {
+    border: 0; background: none; padding: 0; margin: 0;
+    font: inherit; color: #00AEEC; cursor: pointer; opacity: .9;
+  }
+  .fp-reply-toggle:hover { opacity: 1; text-decoration: underline; }
+  .fp-replies {
+    margin: 8px 0 2px; padding: 8px 10px;
+    border-left: 2px solid rgba(148,158,178,.25);
+    background: rgba(148,158,178,.05); border-radius: 0 6px 6px 0;
+    font-size: 12.5px; line-height: 1.7;
+  }
+  .fp-reply { display: flex; gap: 6px; align-items: baseline; padding: 2px 0; }
+  .fp-reply-who { color: #00AEEC; flex: 0 0 auto; max-width: 34%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fp-reply-txt { flex: 1 1 auto; opacity: .85; word-break: break-word; }
+  .fp-reply-meta { flex: 0 0 auto; opacity: .45; font-size: 11.5px; }
+  .fp-reply-more { opacity: .5; font-size: 11.5px; padding-top: 4px; }
   .fp-meta { margin-top: 6px; font-size: 12px; opacity: .55; display: flex; gap: 14px; flex-wrap: wrap; }
 
   .fp-empty { padding: 40px 8px; text-align: center; font-size: 13px; line-height: 2; opacity: .6; }
@@ -1290,7 +1308,9 @@
   function renderPond(force) {
     if (!pondEl || !pondListEl) return;
     updatePondTitle();
-    const sig = AI.size + '|' + REPLIES.size + '|' + searchKW + '|' + CFG.sort + '|' + (scanTotal || 0);
+    // 注意不要把 REPLIES.size 放进签名：拉取子回复会让它变大，
+    // 导致整页重渲染、把已展开的回复和按钮节点都换掉
+    const sig = AI.size + '|' + searchKW + '|' + CFG.sort + '|' + (scanTotal || 0);
     if (!force && sig === pondSig) return;
     pondSig = sig;
 
@@ -1321,6 +1341,118 @@
     }
     pondListEl.textContent = '';
     pondListEl.appendChild(frag);
+  }
+
+  /** 某条评论已有的子回复（按时间正序） */
+  function childrenOf(rpid) {
+    const id = String(rpid);
+    const out = [];
+    for (const [, r] of REPLIES) {
+      if (r.rpid === id) continue;
+      if (String(r.root || '') === id || String(r.parent || '') === id) out.push(r);
+    }
+    out.sort((a, b) => (a.ctime || 0) - (b.ctime || 0));
+    return out;
+  }
+
+  /** 拉一条评论的楼中楼（这个接口不需要 wbi 签名） */
+  async function fetchReplies(rec, pn) {
+    const ctx = currentOid();
+    const oid = (rec.oid || (ctx && ctx.oid) || '');
+    const type = rec.type || (ctx && ctx.type) || '1';
+    if (!oid) return 0;
+    const before = REPLIES.size;
+    try {
+      const url = 'https://api.bilibili.com/x/v2/reply/reply?type=' + encodeURIComponent(type)
+        + '&oid=' + encodeURIComponent(oid)
+        + '&root=' + encodeURIComponent(rec.rpid)
+        + '&ps=20&pn=' + (pn || 1);
+      const r = await fetch(url, { credentials: 'include' });
+      const json = await r.json();
+      if (!json || json.code !== 0) { warn('子回复接口返回', json && json.code); return 0; }
+      walkReplyTree(json, { oid: String(oid), type: String(type), mode: '3' }, 0, true);
+      saveCacheSoon();
+    } catch (e) { warn('拉取子回复失败', e); }
+    return REPLIES.size - before;
+  }
+
+  function renderReplyRow(r) {
+    const row = document.createElement('div');
+    row.className = 'fp-reply';
+    const who = document.createElement('span');
+    who.className = 'fp-reply-who';
+    who.textContent = r.uname || '匿名';
+    const txt = document.createElement('span');
+    txt.className = 'fp-reply-txt';
+    txt.textContent = r.message;
+    const meta = document.createElement('span');
+    meta.className = 'fp-reply-meta';
+    meta.textContent = formatTime(r.ctime) + (r.like ? ' · 👍 ' + r.like : '');
+    row.append(who, txt, meta);
+    return row;
+  }
+
+  // 已展开的评论（重渲染后要还原）
+  const EXPANDED = new Set();
+
+  /** 把子回复填进卡片（不拉接口，只渲染已有的） */
+  function fillReplies(card, rec, loading) {
+    if (!card) return null;
+    let box = card.querySelector('.fp-replies');
+    if (!box) {
+      box = document.createElement('div');
+      box.className = 'fp-replies';
+      const bodyEl = card.querySelector('.fp-body') || card;
+      bodyEl.appendChild(box);
+    }
+    box.textContent = '';
+    if (loading) { box.textContent = '正在加载回复…'; return box; }
+    const kids = childrenOf(rec.rpid);
+    if (!kids.length) {
+      box.textContent = (rec.rcount ? '（没取到回复，可能已被删除）' : '（暂无回复）');
+      return box;
+    }
+    for (const k of kids.slice(0, 60)) box.appendChild(renderReplyRow(k));
+    if ((rec.rcount || 0) > kids.length) {
+      const more = document.createElement('div');
+      more.className = 'fp-reply-more';
+      more.textContent = '还有 ' + ((rec.rcount || 0) - kids.length) + ' 条回复未加载';
+      box.appendChild(more);
+    }
+    return box;
+  }
+
+  function cardOf(rpid) {
+    if (!pondEl) return null;
+    const id = String(rpid).replace(/"/g, '');
+    return deepQueryOne(pondEl, '.fp-card[data-rpid="' + id + '"]');
+  }
+
+  /** 展开 / 收起某条评论的子回复 */
+  async function toggleReplies(rpid) {
+    const id = String(rpid);
+    const rec = REPLIES.get(id);
+    if (!rec) return;
+    const card = cardOf(id);
+
+    if (EXPANDED.has(id)) {
+      EXPANDED.delete(id);
+      const box = card && card.querySelector('.fp-replies');
+      if (box) box.remove();
+      return;
+    }
+    EXPANDED.add(id);
+    if (card) fillReplies(card, rec, childrenOf(id).length < (rec.rcount || 0));
+
+    if (childrenOf(id).length < (rec.rcount || 0)) {
+      await fetchReplies(rec, 1);
+      // 拉完可能触发过重渲染，重新取卡片再填
+      const card2 = cardOf(id);
+      if (card2) fillReplies(card2, rec, false);
+    } else {
+      const card2 = cardOf(id);
+      if (card2) fillReplies(card2, rec, false);
+    }
   }
 
   function renderCard(rec) {
@@ -1378,8 +1510,13 @@
     ml3.textContent = '👍 ' + (rec.like || 0);
     meta.appendChild(ml3);
     if (rec.rcount) {
-      const mr = document.createElement('span');
-      mr.textContent = '💬 ' + rec.rcount;
+      const mr = document.createElement('button');
+      mr.type = 'button';
+      mr.className = 'fp-reply-toggle';
+      mr.dataset.act = 'replies';
+      mr.dataset.for = rec.rpid;
+      mr.textContent = '💬 ' + rec.rcount + ' 条回复';
+      mr.title = '展开 / 收起回复';
       meta.appendChild(mr);
     }
     const stags = suspectTags(rec);
@@ -1392,6 +1529,10 @@
 
     body.append(top, text, meta);
     card.append(av, body);
+    // 重渲染后把已展开的子回复还原回去
+    if (rec.rcount && EXPANDED.has(String(rec.rpid))) {
+      try { fillReplies(card, rec, false); } catch (e) {}
+    }
     return card;
   }
 
@@ -1407,6 +1548,11 @@
     const act = actEl.dataset.act;
     if (act === 'exit') { setPond(false); return; }
     if (act === 'scan') { scanAll(); return; }
+    if (act === 'replies') {
+      const id = actEl.dataset.for || (actEl.closest('.fp-card') || {}).dataset && actEl.closest('.fp-card').dataset.rpid;
+      if (id) toggleReplies(id);
+      return;
+    }
     if (act === 'sort') {
       CFG.sort = CFG.sort === 'time' ? 'score' : 'time';
       pondEl.__sortBtn.textContent = CFG.sort === 'time' ? '时间↓' : '分数↓';
