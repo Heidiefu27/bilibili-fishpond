@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         2.3.0
+// @version         2.3.1
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -41,7 +41,7 @@
    * 0. 配置
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '2.3.0';
+  const VERSION = '2.3.1';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -62,7 +62,7 @@
 
   // 扫描全部评论的上限（防止一条视频扫太久）
   // 前置排除用：本视频 UP 主 + 高等级账号阈值
-  const VIP_LEVEL = 5;              // 账号等级 ≥ 5 → 必定不是鱼
+  const VIP_LEVEL = 4;              // 账号等级 ≥ 4 → 必定不是鱼
   const VIP = { upMid: '', upName: '' };
 
   function detectUp() {
@@ -264,7 +264,7 @@
     const msg = rec.message || '';
     if (CFG.requireAt && !RE_AT.test(msg)) return false;
 
-    // 排除①：账号等级 ≥ 5 的老号，必定不是这波水军
+    // 排除①：账号等级 ≥ 4 的老号，必定不是这波水军
     if (rec.level >= VIP_LEVEL) return false;
 
     // 排除②：@ 的对象就是本视频 UP 主（在跟 UP 对话，不是发推广）
