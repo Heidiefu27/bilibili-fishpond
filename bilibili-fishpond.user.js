@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         1.6.2
+// @version         1.7.0
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗；支持手动投喂(Alt+点击)、放回、搜索、复制、导出
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -27,7 +27,7 @@
  * 1) document-start 处挂 fetch / XMLHttpRequest 钩子，拦下评论区接口
  *    （/x/v2/reply*，新版是 /x/v2/reply/wbi/main，mode=3 就是“最新”）。
  * 2) 每条评论按“AI/推广味”打分：标点结构、总结腔、功能罗列腔、DSH/插件话题、
- *    ID 带“鱼/鲸”、@某人、文案与其他评论高度重复（查重）… 分数 ≥ 阈值 → 进鱼塘。
+ *    ID 带“鱼/鲸”、@某人… 分数 ≥ 阈值 → 进鱼塘（判定只看“必须有 @”+“分数 ≥ 阈值”）。
  * 3) 判定的评论直接从返回的 JSON 里 splice 掉 → 原评论区根本不渲染它，
  *    没有空白坑、不会闪一下（比事后 display:none 干净）。
  * 4) “最热/最新”右边生成一个【🐟 鱼塘 N】页签；点它就在**原评论区的位置**
@@ -46,7 +46,7 @@
    * 0. 基础
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '1.6.2';
+  const VERSION = '1.7.0';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -54,7 +54,6 @@
 
   const NS = 'fishpond';
   const K_CFG = NS + ':cfg';
-  const K_FORCE = NS + ':force';       // { rpid: 'ai' | 'human' } 人工纠正
   const K_CACHE = NS + ':cache:';      // 按页面缓存鱼塘（刷新后仍在）
 
   const DEFAULT_CFG = {
@@ -102,10 +101,13 @@
   };
 
   let CFG = Object.assign({}, DEFAULT_CFG, store.get(K_CFG, {}) || {});
-  let FORCE = store.get(K_FORCE, {}) || {};
+
+  // 判定只看「必须 @」+「分数 ≥ 阈值」。
+  // 这两个集合只服务 Alt+点击 / 放回 两个按钮，且**仅本页记忆**（刷新即忘）。
+  const MANUAL_IN = new Set();    // 手动投进鱼塘
+  const MANUAL_OUT = new Set();   // 手动放回
 
   const saveCfg = () => store.set(K_CFG, CFG);
-  const saveForce = () => store.set(K_FORCE, FORCE);
 
   /* ══════════════════════════════════════════════════════════════
    * 2. 打分
@@ -214,20 +216,6 @@
   const RE_AT = /@\s*[^\s@]{1,24}/;                    // @ 了别人（推广文案几乎必带，注意 B 站有“@ 名字”带空格的写法）
   const RE_TOPIC = /(DSH|DeepSeek|便签|插件|草稿纸|agent|GitHub|开源|模型|字体|配色|订阅|安装|设置里)/gi;
 
-  const normKey = (s) => String(s == null ? '' : s).replace(/[\s\p{P}\p{S}]/gu, '').toLowerCase();
-  const grams = (s, n) => {
-    const set = new Set();
-    for (let i = 0; i + n <= s.length; i++) set.add(s.slice(i, i + n));
-    return set;
-  };
-  const jaccard = (a, b) => {
-    if (!a.size || !b.size) return 0;
-    let inter = 0;
-    const small = a.size < b.size ? a : b;
-    const big = a.size < b.size ? b : a;
-    for (const g of small) if (big.has(g)) inter++;
-    return inter / (a.size + b.size - inter);
-  };
 
   /* ══════════════════════════════════════════════════════════════
    * 3. 评论数据登记 / 剔除
@@ -236,7 +224,6 @@
   const REPLIES = new Map();   // rpid -> record
   const AI = new Set();        // 进鱼塘的 rpid
   const NEEDLES = new Map();   // rpid -> 文本 needle（DOM 兜底用）
-  const DUP = new Set();       // 文案与其他评论高度重复的 rpid
   const COUNTED = new Set();   // 已经扣过“评论 N”的 rpid（最热/最新重复请求时不重复扣）
 
   function normalizeText(t) { return String(t || '').replace(/\s+/g, '').trim(); }
@@ -312,16 +299,11 @@
 
   function judge(rec) {
     if (!rec) return false;
-    const ov = FORCE[rec.rpid];
-    if (ov === 'ai') return true;
-    if (ov === 'human') return false;
-    if (DUP.has(rec.rpid)) return true;          // 文案查重命中：直接进鱼塘
-    // 硬性门槛①：这波水军必然 @ 了某个人；没 @ 的一律当正常人处理
+    // 本页手动动作（只服务按钮，不跨页记忆）
+    if (MANUAL_OUT.has(rec.rpid)) return false;
+    if (MANUAL_IN.has(rec.rpid)) return true;
+    // 判定：必须有 @ + 分数 ≥ 阈值
     if (CFG.requireAt && !RE_AT.test(rec.message || '')) return false;
-    // 硬性门槛②：去掉 @ 之后正文不足 10 字（“@某人 总结邮箱”“@某人 收到”），
-    // 不可能是推广文案，阈值调到最低也不收
-    const body = String(rec.message || '').replace(RE_AT, '').replace(/\s+/g, '').trim();
-    if (body.length < 10) return false;
     return rec.score >= Number(CFG.threshold || 6);
   }
 
@@ -372,68 +354,10 @@
     const ev = evaluate(rec);
     rec.score = ev.score;
     rec.hits = ev.hits;
-    // 查重用的归一化串和 n-gram 缓存
-    rec.key = normKey(message);
-    rec.g2 = null;
-    rec.g3 = null;
 
     REPLIES.set(rpid, rec);
     refreshAI(rec);
     return { rec, isAI: AI.has(rpid) };
-  }
-
-  function gramsOf(rec, n) {
-    if (n === 2) { if (!rec.g2) rec.g2 = grams(rec.key, 2); return rec.g2; }
-    if (!rec.g3) rec.g3 = grams(rec.key, 3);
-    return rec.g3;
-  }
-
-  /** 判断两条评论是不是“同一套文案”（水军最爱复制粘贴） */
-  function isDupPair(a, b) {
-    if (!a || !b || !a.key || !b.key) return false;
-    const la = a.key.length;
-    const lb = b.key.length;
-    const min = Math.min(la, lb);
-    const max = Math.max(la, lb);
-    if (min < 20) return false;          // 太短的不比，免得“谢谢分享”互相误伤
-    if (max > min * 2.5) return false;   // 长度差太多不比
-    const g2 = jaccard(gramsOf(a, 2), gramsOf(b, 2));
-    if (g2 >= 0.30) return true;
-    if (g2 < 0.20) return false;
-    const g3 = jaccard(gramsOf(a, 3), gramsOf(b, 3));
-    return g3 >= 0.12;
-  }
-
-  /** 找一条与它高度重复的评论 */
-  function findDup(rec) {
-    if (!rec.key || rec.key.length < 20) return null;
-    for (const [rpid, o] of REPLIES) {
-      if (rpid === rec.rpid) continue;
-      if (isDupPair(rec, o)) return o;
-    }
-    return null;
-  }
-
-  function markDup(a, b) {
-    if (!a || !b) return false;
-    let changed = false;
-    if (!DUP.has(a.rpid)) { DUP.add(a.rpid); changed = true; }
-    if (!DUP.has(b.rpid)) { DUP.add(b.rpid); changed = true; }
-    if (changed) { refreshAI(a); refreshAI(b); }
-    return changed;
-  }
-
-  /** 全量重建查重（加载缓存 / 改阈值后调一次） */
-  function rebuildDup() {
-    DUP.clear();
-    if (REPLIES.size < 2 || REPLIES.size > 600) return;
-    const list = [...REPLIES.values()].filter((r) => r.key && r.key.length >= 20);
-    for (let i = 0; i < list.length; i++) {
-      for (let j = i + 1; j < list.length; j++) {
-        if (isDupPair(list[i], list[j])) { DUP.add(list[i].rpid); DUP.add(list[j].rpid); }
-      }
-    }
-    for (const rpid of DUP) { const r = REPLIES.get(rpid); if (r) refreshAI(r); }
   }
 
   /** 递归扫描评论接口的 JSON：登记所有评论，并把 AI 评论从数组里剔掉 */
@@ -475,10 +399,8 @@
     const rpid = String(reply.rpid || reply.rpid_str || '');
     const msg = (reply.content && reply.content.message) || '';
     if (!rpid || !msg.trim()) return false;
-    const ov = FORCE[rpid];
-    if (ov === 'ai') return true;
-    if (ov === 'human') return false;
-    if (DUP.has(rpid)) return true;
+    if (MANUAL_OUT.has(rpid)) return false;
+    if (MANUAL_IN.has(rpid)) return true;
     if (CFG.requireAt && !RE_AT.test(msg)) return false;
     return scoreComment(msg).score >= Number(CFG.threshold || 6);
   }
@@ -487,16 +409,8 @@
     if (!json || typeof json !== 'object') return 0;
     const ctx = parseCtx(url);
 
-    // 第一遍：只登记、不剔除（要先把这一批都拿到手，才能做文案查重）
-    const before = REPLIES.size;
+    // 第一遍：只登记、不剔除
     walkReplyTree(json, ctx, 0, true);
-    if (REPLIES.size !== before) {
-      for (const [rpid, r] of REPLIES) {
-        if (DUP.has(rpid)) continue;
-        const d = findDup(r);
-        if (d) markDup(r, d);
-      }
-    }
 
     // 边角保护：如果这一页会被剔得一条不剩，组件可能以为“没有更多”而停加载，
     // 这种情况就不剔了，交给 DOM 兜底去藏，分页照常。
@@ -985,9 +899,6 @@
         href: raw.href || buildHref(raw.rpid),
         score: 0,
         hits: [],
-        key: normKey(raw.message),
-        g2: null,
-        g3: null,
       };
       const ev = evaluate(rec);
       rec.score = ev.score;
@@ -995,7 +906,6 @@
       REPLIES.set(rec.rpid, rec);
       refreshAI(rec);
     }
-    rebuildDup();
     log('缓存恢复', AI.size, '条');
   }
 
@@ -1150,7 +1060,6 @@
     range.addEventListener('input', () => { val.textContent = range.value; CFG.threshold = Number(range.value); });
     range.addEventListener('change', () => {
       saveCfg();
-      rebuildDup();
       recompute();
       toast('阈值改为 ' + CFG.threshold);
     });
@@ -1196,7 +1105,7 @@
 
   function renderPond(force) {
     if (!pondEl || !pondListEl) return;
-    const sig = AI.size + '|' + REPLIES.size + '|' + searchKW + '|' + CFG.sort + '|' + (CFG.showReasons ? 1 : 0) + '|' + DUP.size;
+    const sig = AI.size + '|' + REPLIES.size + '|' + searchKW + '|' + CFG.sort + '|' + (CFG.showReasons ? 1 : 0);
     updatePondTitle();
     if (!force && sig === pondSig) return;
     pondSig = sig;
@@ -1254,7 +1163,7 @@
     const aiTag = document.createElement('span');
     aiTag.className = 'fp-ai';
     aiTag.dataset.act = 'why';
-    aiTag.textContent = DUP.has(rec.rpid) ? '查重命中' : 'AI ' + rec.score;
+    aiTag.textContent = 'AI ' + rec.score;
     aiTag.title = '点击看判定依据';
     top.appendChild(aiTag);
 
@@ -1312,7 +1221,6 @@
     whys.className = 'fp-whys';
     whys.hidden = !CFG.showReasons;
     const allHits = (rec.hits || []).slice();
-    if (DUP.has(rec.rpid)) allHits.unshift({ w: 6, name: '文案与其他评论高度重复' });
     const hits = allHits.slice(0, 4);
     if (hits.length) {
       for (const h of hits) {
@@ -1398,7 +1306,7 @@
   function copyAll() {
     const list = currentList();
     if (!list.length) { toast('鱼塘是空的'); return; }
-    const txt = list.map((r) => '【' + r.uname + '】(' + formatTime(r.ctime) + (DUP.has(r.rpid) ? ', 查重命中' : ', AI ' + r.score + '分') + ')\n' + r.message).join('\n\n---\n\n');
+    const txt = list.map((r) => '【' + r.uname + '】(' + formatTime(r.ctime) + ', AI ' + r.score + '分' + ')\n' + r.message).join('\n\n---\n\n');
     copyText(txt).then((ok) => toast(ok ? '已复制 ' + list.length + ' 条' : '复制失败'));
   }
 
@@ -1408,7 +1316,7 @@
     const data = JSON.stringify(list.map((r) => ({
       rpid: r.rpid, uname: r.uname, mid: r.mid, ctime: r.ctime, like: r.like,
       location: r.location, message: r.message, score: r.score,
-      dup: DUP.has(r.rpid), hits: r.hits,
+      hits: r.hits,
     })), null, 2);
     const blob = new Blob([data], { type: 'application/json' });
     const a = document.createElement('a');
@@ -1420,32 +1328,32 @@
   }
 
   function restoreOne(rpid) {
-    FORCE[rpid] = 'human';
-    saveForce();
+    MANUAL_OUT.add(rpid);
+    MANUAL_IN.delete(rpid);
     AI.delete(rpid);
     NEEDLES.delete(rpid);
     unhideRpid(rpid);
     saveCacheSoon();
     renderPond(true);
     updateTabCount();
-    toast('已放回评论区（刷新页面后出现在正常列表里）');
+    toast('已放回评论区（本页生效；刷新后按 @ 和分数重新判定）');
   }
 
   function restoreAll() {
     if (!AI.size) { toast('鱼塘是空的'); return; }
     let n = 0;
     for (const rpid of AI) {
-      FORCE[rpid] = 'human';
+      MANUAL_OUT.add(rpid);
+      MANUAL_IN.delete(rpid);
       unhideRpid(rpid);
       n++;
     }
     AI.clear();
     NEEDLES.clear();
-    saveForce();
     saveCacheSoon();
     renderPond(true);
     updateTabCount();
-    toast('已放回 ' + n + ' 条，刷新页面后生效');
+    toast('已放回 ' + n + ' 条（本页生效）');
   }
 
   /** 隐藏原列表 / 恢复原列表 */
@@ -1899,14 +1807,14 @@
       rec = rec && rec.rec ? rec.rec : REPLIES.get(rpid);
     }
     if (!rec) return;
-    FORCE[rpid] = 'ai';
-    saveForce();
+    MANUAL_IN.add(rpid);
+    MANUAL_OUT.delete(rpid);
     refreshAI(rec);
     hideCard(card, rpid);
     saveCacheSoon();
     updateTabCount();
     if (pondOn) renderPond(true);
-    toast('已投进鱼塘 🐟（刷新后这条不会再出现在评论区）');
+    toast('已投进鱼塘 🐟（本页生效）');
   }
 
   function installManualHook() {
@@ -1932,7 +1840,6 @@
       rec.hits = ev.hits;
       refreshAI(rec);
     }
-    for (const rpid of DUP) { const r = REPLIES.get(rpid); if (r) refreshAI(r); }
     restoreAllDom();
     saveCacheSoon();
     updateTabCount();
@@ -2078,14 +1985,13 @@
       GM_registerMenuCommand('🐟 判定阈值：' + CFG.threshold + '（点一下 +1）', () => {
         CFG.threshold = CFG.threshold >= 12 ? 3 : CFG.threshold + 1;
         saveCfg();
-        rebuildDup();
         recompute();
         toast('阈值 → ' + CFG.threshold);
       });
       GM_registerMenuCommand('🐟 清空鱼塘缓存与人工标记', () => {
         store.del(cacheKey || computeCacheKey());
-        FORCE = {};
-        saveForce();
+        MANUAL_IN.clear();
+        MANUAL_OUT.clear();
         toast('已清空，刷新页面生效');
       });
     } catch (e) { warn('菜单注册失败', e); }
@@ -2119,7 +2025,6 @@
     REPLIES.clear();
     AI.clear();
     NEEDLES.clear();
-    DUP.clear();
     COUNTED.clear();
     hiddenCards.clear();
     cacheKey = '';
@@ -2182,7 +2087,6 @@
         get cfg() { return CFG; },
         get pond() { return [...AI].map((r) => REPLIES.get(r)).filter(Boolean); },
         get scanned() { return [...REPLIES.values()]; },
-        get dup() { return [...DUP]; },
         diag() {
           const cards = [];
           const scope = commentScope();
@@ -2199,7 +2103,6 @@
             api: { seen: NET.seen, pruned: NET.pruned, urls: [...NET.urls].slice(0, 6), byMode: NET.byMode },
             replies: REPLIES.size,
             pond: AI.size,
-            dup: DUP.size,
             counted: COUNTED.size,
             domCards: cards.length,
             domHidden: hiddenCards.size,
@@ -2214,8 +2117,9 @@
         judge(rpid) { const r = REPLIES.get(String(rpid)); return r ? judge(r) : null; },
         force(rpid, v) {
           const k = String(rpid);
-          if (v === 'ai' || v === 'human') FORCE[k] = v; else delete FORCE[k];
-          saveForce();
+          if (v === 'ai') { MANUAL_IN.add(k); MANUAL_OUT.delete(k); }
+          else if (v === 'human') { MANUAL_OUT.add(k); MANUAL_IN.delete(k); }
+          else { MANUAL_IN.delete(k); MANUAL_OUT.delete(k); }
           recompute();
         },
         score: (t) => scoreComment(t),
