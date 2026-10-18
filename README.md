@@ -13,9 +13,11 @@
 
 需要 [Tampermonkey](https://www.tampermonkey.net/)，然后点这里：
 
-<https://raw.githubusercontent.com/Heidiefu27/bilibili-fishpond/main/bilibili-fishpond.user.js>
+<https://cdn.jsdelivr.net/gh/Heidiefu27/bilibili-fishpond@main/bilibili-fishpond.user.js>
 
-装完打开任意视频页，滚到评论区，排序条右侧出现蓝鲸图标 + `鱼塘` 即生效。脚本带 `@updateURL`，之后自动更新。
+<sub>备用（raw，CDN 缓存可能滞后十几分钟）：<https://raw.githubusercontent.com/Heidiefu27/bilibili-fishpond/main/bilibili-fishpond.user.js></sub>
+
+装完打开任意视频页，滚到评论区，排序条右侧出现蓝鲸图标 + `鱼塘` 即生效。脚本的 `@updateURL` 指向同一个 jsDelivr 地址，之后会自动检查更新。
 
 ## 使用
 
