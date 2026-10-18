@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         2.4.0
+// @version         2.5.1
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -41,7 +41,7 @@
    * 0. 配置
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '2.4.0';
+  const VERSION = '2.5.1';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -231,11 +231,22 @@
   const RE_AT = /@\s*[^\s@]{1,24}/;               // @ 了别人（注意 B 站有“@ 名字”带空格的写法）
   const RE_TOPIC = /(DSH|DeepSeek|便签|插件|草稿纸|agent|GitHub|开源|模型|字体|配色|订阅|安装|设置里)/gi;
 
+  /**
+   * B 站回复某人时，正文会带「回复 @某人 :」前缀。这不是推广里的 @，
+   * 打分和 @ 门槛都必须用去掉前缀后的正文。
+   */
+  function splitQuote(msg) {
+    const m = /^\s*回复\s*@\s*([^\s:：]{1,24})\s*[:：]\s*/.exec(String(msg || ''));
+    if (!m) return { body: String(msg || ''), quoteTo: '' };
+    return { body: String(msg || '').slice(m[0].length), quoteTo: m[1] };
+  }
+
   function evaluate(rec) {
-    const base = scoreComment(rec.message);
+    const q = splitQuote(rec.message);
+    const base = scoreComment(q.body);
     const hits = base.hits.slice();
     let score = base.score;
-    const msg = rec.message || '';
+    const msg = q.body;
     const name = rec.uname || '';
 
     if (RE_ID_FISH.test(name)) { score += 2; hits.push({ w: 2, name: 'ID 带鱼/鲸' }); }
@@ -275,7 +286,13 @@
   /** 判定：必须有 @ → @ 的不是本视频 UP → 分数 ≥ 阈值（等级只算分，不排除） */
   function judge(rec) {
     if (!rec) return false;
-    const msg = rec.message || '';
+    const q = splitQuote(rec.message);
+    const msg = q.body;
+
+    // 排除：这条就是在回复本视频 UP 主
+    if (VIP.upName && q.quoteTo && q.quoteTo === VIP.upName) return false;
+
+    // 必须有 @（剔除「回复 @某人 :」这种引用）
     if (CFG.requireAt && !RE_AT.test(msg)) return false;
 
     // 排除：@ 的对象就是本视频 UP 主（在跟 UP 对话，不是发推广）
@@ -495,6 +512,7 @@
 
   let scanning = false;
   let scanAbort = false;
+  let scanTotal = 0;   // 接口报告的评论总数（all_count）
 
   /** 精简 MD5（wbi 签名要用；脚本里没有 Node 的 crypto） */
   function md5Hex(input) {
@@ -591,12 +609,21 @@
         plat: 1,
         web_location: 1315875,
       }, key);
+      // 带重试：B 站偶发 -412/-352 限流，或网络抖动
       let json = null;
-      try {
-        const r = await fetch('https://api.bilibili.com/x/v2/reply/wbi/main?' + q, { credentials: 'include' });
-        json = await r.json();
-      } catch (e) { warn('扫描请求失败', e); break; }
-      if (!json || json.code !== 0) { warn('扫描接口返回', json && json.code, json && json.message); break; }
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const r = await fetch('https://api.bilibili.com/x/v2/reply/wbi/main?' + q, { credentials: 'include' });
+          json = await r.json();
+          if (json && json.code === 0) break;
+          warn('扫描接口返回', json && json.code, json && json.message);
+          if (attempt < 2) await new Promise((res) => setTimeout(res, 800 * (attempt + 1)));
+        } catch (e) {
+          warn('扫描请求失败', e);
+          if (attempt < 2) await new Promise((res) => setTimeout(res, 800 * (attempt + 1)));
+        }
+      }
+      if (!json || json.code !== 0) { warn('扫描放弃这一页'); break; }
 
       const before = REPLIES.size;
       try { walkReplyTree(json, parseCtx('https://api.bilibili.com/x/v2/reply/wbi/main?oid=' + ctx.oid + '&type=' + ctx.type + '&mode=3'), 0, true); } catch (e) {}
@@ -604,14 +631,17 @@
 
       const cur = json.data && json.data.cursor || {};
       const total = cur.all_count || 0;
+      if (total) scanTotal = total;
       pages++;
       scanProgress('扫描中 ' + pages + ' 页 · 已收 ' + added + ' 条 / 共 ' + total);
       saveCacheSoon();
       bumpUI();
 
       if (cur.is_end) break;
-      const next = cur.pagination_reply && cur.pagination_reply.next;
-      if (!next) { offset = null; break; }   // 匿名/无 token → 交给兜底
+      // 分页 token 在 pagination_reply.next_offset（旧字段是 next，做兼容）
+      const pr = cur.pagination_reply || {};
+      const next = pr.next_offset || pr.next;
+      if (!next) { offset = null; break; }   // 拿不到 token → 交给滚动兜底
       offset = next;
       await new Promise((r) => setTimeout(r, SCAN_DELAY));
     }
@@ -624,7 +654,7 @@
     if (!feed) return 0;
     const start = REPLIES.size;
     let idle = 0;
-    for (let i = 0; i < 80 && !scanAbort; i++) {
+    for (let i = 0; i < 120 && !scanAbort; i++) {
       const before = REPLIES.size;
       try {
         const more = deepQueryOne(commentScope(), '[class*="load-more"], .load-more, .reply-load-more');
@@ -653,8 +683,17 @@
     const start = REPLIES.size;
     let added = 0;
     try {
+      const total = scanTotal || 0;
       added = await scanByApi();
-      if (added < 0) { scanByScroll(); added = REPLIES.size - start; }
+      if (added < 0) {
+        // 接口拿不到分页 token → 靠页面自己加载
+        await scanByScroll();
+      } else if (total && REPLIES.size < total * 0.8) {
+        // 接口提前 is_end（未登录/风控只给部分），补一轮滚动，尽量把能看的都收进来
+        scanProgress('接口只给了 ' + REPLIES.size + ' / ' + total + ' 条，继续滚动补…');
+        await scanByScroll();
+      }
+      added = REPLIES.size - start;
     } catch (e) {
       warn('扫描出错', e);
       try { scanByScroll(); } catch (e2) {}
@@ -1911,6 +1950,7 @@
             vip: { upMid: VIP.upMid || detectUp() || '', upName: VIP.upName },
             levelWeights: { '0-1': 4, '2-3': 2, '4': 0, '5': -2, '6': -3 },
             tab: !!(tabEl && tabEl.isConnected),
+            scanning,
             anchor: !!findSortAnchor(),
             pondOn,
             cfg: CFG,

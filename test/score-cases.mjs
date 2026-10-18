@@ -59,6 +59,35 @@ const SHOULD_PASS = [
   '蹲一个，晚上回家试试，先码住',
 ];
 
+/* ---------- 「回复 @某人 :」引用前缀处理（v2.5.0） ---------- */
+let splitQuote = null;
+{
+  const a = src.indexOf('function splitQuote(msg) {');
+  const b = src.indexOf('function evaluate(rec) {', a);
+  if (a > 0 && b > a) {
+    splitQuote = new Function(src.slice(a, b) + '; return splitQuote;')();
+    const cases = [
+      ['回复 @张三 :这是正文', '这是正文', '张三'],
+      ['回复 @张三：这是正文', '这是正文', '张三'],
+      ['回复 @A_B-1 :  x', 'x', 'A_B-1'],
+      ['@李四 这是正文', '@李四 这是正文', ''],
+      ['普通评论', '普通评论', ''],
+    ];
+    let qbad = 0;
+    for (const [input, body, quoteTo] of cases) {
+      const r = splitQuote(input);
+      if (r.body !== body || r.quoteTo !== quoteTo) {
+        qbad++;
+        console.log('  ✗ splitQuote(' + JSON.stringify(input) + ') = ' + JSON.stringify(r));
+      }
+    }
+    console.log('\n—— 引用前缀 ——\n' + (qbad ? '✗ ' + qbad + ' 条不符' : '✓ ' + cases.length + ' 组全部正确'));
+    if (qbad) process.exitCode = 1;
+  } else {
+    console.log('⚠ 未找到 splitQuote');
+  }
+}
+
 let bad = 0;
 const show = (r) => r.hits.slice(0, 4).map((h) => `${h.w > 0 ? '+' : ''}${h.w}${h.name}`).join(' | ');
 
