@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         2.1.2
+// @version         2.1.4
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -41,7 +41,7 @@
    * 0. 配置
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '2.1.2';
+  const VERSION = '2.1.4';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -62,7 +62,12 @@
 
   // DeepSeek 蓝鲸 logo（内嵌 data URI：脚本不联网也能显示）
   const ICON = 'data:image/png;base64,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';
-  const iconTag = (cls) => '<img class="fp-icon ' + (cls || '') + '" src="' + ICON + '" alt="" draggable="false">';
+  // 内联尺寸：即使影子根里残留旧版样式表（没有 .fp-icon 规则），图标也不会被放成原图大小
+  const iconTag = (cls) => {
+    const size = /title/.test(cls || '') ? 17 : 15;
+    return '<img class="fp-icon ' + (cls || '') + '" src="' + ICON + '" alt="" draggable="false"'
+      + ' style="width:' + size + 'px;height:' + size + 'px;display:block;object-fit:contain" />';
+  };
 
   const store = {
     get(key, def) {
@@ -687,9 +692,12 @@
   const CSS = TAB_CSS + POND_CSS;
 
   function injectCSS() {
-    if (document.getElementById('fp-style')) return;
+    const cur = document.getElementById('fp-style');
+    if (cur && cur.dataset.fpVer === VERSION) return;
+    if (cur) { try { cur.remove(); } catch (e) {} }
     const style = document.createElement('style');
     style.id = 'fp-style';
+    style.dataset.fpVer = VERSION;
     style.textContent = CSS;
     (document.head || document.documentElement).appendChild(style);
   }
@@ -697,9 +705,12 @@
   function injectShadowCSS(root) {
     if (!root || !root.host) return;
     try {
-      if (root.querySelector('style[data-fp]')) return;
+      const cur = root.querySelector('style[data-fp]');
+      if (cur && cur.dataset.fpVer === VERSION) return;
+      if (cur) { try { cur.remove(); } catch (e) {} }   // 旧实例留下的旧样式表直接换掉
       const style = document.createElement('style');
       style.setAttribute('data-fp', '1');
+      style.dataset.fpVer = VERSION;
       style.textContent = CSS;
       root.appendChild(style);
     } catch (e) {}
@@ -1176,6 +1187,7 @@
     const count = document.createElement('i');
     count.className = 'fp-tab-count' + (AI.size ? '' : ' zero');
     count.textContent = AI.size;
+    btn.dataset.fpVer = VERSION;   // 版本标记：多个实例并存时用于判定谁该留下
     btn.append(fish, text, count);
     btn.title = '只看被收走的 AI/推广评论';
     btn.addEventListener('click', (e) => {
@@ -1220,7 +1232,9 @@
     // 已有页签（另一个脚本实例插的 / tabEl 引用丢了）→ 认领它，别再插一枚
     const existing = anchor.parentNode.querySelector('.fp-tab');
     if (existing) {
-      if (existing.querySelector('.fp-tab-count')) {
+      // 旧版本（无版本标记或标记不同）插的页签 → 换成本版本的，避免一直显示旧图标
+      const sameVer = existing.dataset && existing.dataset.fpVer === VERSION;
+      if (sameVer && existing.querySelector('.fp-tab-count')) {
         tabEl = existing;
         dedupeTabs(existing);
       } else {

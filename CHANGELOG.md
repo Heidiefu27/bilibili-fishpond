@@ -1,5 +1,17 @@
 # 更新日志
 
+## [2.1.4] — 图标尺寸内联 + 样式表按版本替换
+
+- 图标改为**内联尺寸**（`style="width:15px;height:15px"`）：旧实例残留在影子根里的旧样式表不再导致图标被放成 64px 原图
+- 注入的 `<style>` 带 `data-fp-ver`，版本不一致时替换掉旧样式表（避免"新代码 + 旧样式"）
+- 与 2.1.3 的版本标记配合：新旧实例并存时，页签会收敛到当前版本
+
+## [2.1.3] — 页签带版本标记
+
+- 页签增加 `data-fp-ver` 属性；认领时会比对版本，**不是当前版本的页签直接换掉**
+- 解决"新旧两个脚本实例共存时，页签一直被旧实例的图标占着"的问题（旧版 🐟 会被替换成新版蓝鲸）
+- 侧信道：控制台可用 `document.querySelector('bili-comments').shadowRoot.querySelector('.fp-tab').dataset.fpVer` 看当前页签由哪个版本插入
+
 ## [2.1.2] — 更新源回退到 raw
 
 - `@updateURL` / `@downloadURL` 改回 raw.githubusercontent：jsDelivr 对 `@main` 有约 12 小时缓存，用它做更新检查反而更滞后
