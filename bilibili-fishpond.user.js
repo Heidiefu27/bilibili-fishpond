@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         2.6.0
+// @version         2.6.1
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -41,7 +41,7 @@
    * 0. 配置
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '2.6.0';
+  const VERSION = '2.6.1';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -295,7 +295,13 @@
     if (Number(rec.like) >= LIKE_EXEMPT) return false;
 
     // 排除：这条评论有子回复（真人在讨论，水军评论没人回）
-    if (Number(rec.rcount) > 0) return false;
+    // 例外：如果【已知的子回复作者全是被它 @ 的人】，那是水军互捧，仍然算鱼
+    if (Number(rec.rcount) > 0) {
+      const ats = (rec.ats || []).map(String);
+      const kids = (rec.childMids || []).map(String);
+      const onlyShillReplied = kids.length > 0 && ats.length > 0 && kids.every((m) => ats.indexOf(m) !== -1);
+      if (!onlyShillReplied) return false;
+    }
 
     // 排除：这条就是在回复本视频 UP 主
     if (VIP.upName && q.quoteTo && q.quoteTo === VIP.upName) return false;
@@ -346,6 +352,18 @@
   function pickLevel(o) {
     const lv = o && o.member && o.member.level_info && o.member.level_info.current_level;
     return typeof lv === 'number' ? lv : 0;
+  }
+
+  /** 这条评论下面已有的子回复作者（接口一般带前几条） */
+  function pickChildMids(o) {
+    const arr = o && o.replies;
+    if (!Array.isArray(arr)) return [];
+    const out = [];
+    for (const r of arr) {
+      const m = r && r.member && r.member.mid;
+      if (m) out.push(String(m));
+    }
+    return out;
   }
 
   /** 这条评论 @ 了谁（B 站接口在 content.members 里给了 mid） */
@@ -417,6 +435,7 @@
       ctime: reply.ctime || (prev && prev.ctime) || 0,
       like: reply.like || 0,
       rcount: Number(reply.rcount != null ? reply.rcount : reply.count) || 0,
+      childMids: pickChildMids(reply),
       location: pickLocation(reply) || (prev && prev.location) || '',
       level: pickLevel(reply) || (prev && prev.level) || 0,
       ats: pickAts(reply) || (prev && prev.ats) || [],
@@ -949,6 +968,10 @@
   .fp-tab-text { display: inline-block; }
   .fp-icon { width: 15px; height: 15px; display: inline-block; vertical-align: -2px; }
   /* 原评论区里的"疑似鱼但没收录"标记 */
+  .fp-suspect-inline {
+    position: static; margin-left: 6px; display: inline-block;
+    vertical-align: 1px; right: auto; top: auto;
+  }
   .fp-suspect {
     position: absolute; right: 8px; top: 6px; z-index: 2;
     font-size: 11px; line-height: 16px; padding: 0 6px; border-radius: 7px;
@@ -1745,6 +1768,75 @@
     return '';
   }
 
+  /** 找卡片里渲染正文的那个最深节点（穿透 shadowRoot） */
+  function findTextHost(el, needle) {
+    if (!needle) return null;
+    // 页面上正文会带空格/换行，这里两边都去掉空白再比
+    const norm = (t) => String(t || '').replace(/\s+/g, '');
+    const target = norm(needle);
+    if (!target) return null;
+    let best = null;
+    const walk = (node, depth) => {
+      if (!node || depth > 8) return;
+      let kids = [];
+      try { kids = node.children || []; } catch (e) { kids = []; }
+      for (const k of kids) {
+        if (norm(k.textContent).indexOf(target) === -1) continue;
+        best = k;
+        if (k.shadowRoot) walk(k.shadowRoot, depth + 1);
+        walk(k, depth + 1);
+      }
+    };
+    walk(el, 0);
+    if (el.shadowRoot) walk(el.shadowRoot, 0);
+    return best;
+  }
+
+  /** 把标记真正显示出来：优先插到正文后面的行内位置，失败则塞进影子根并绝对定位 */
+  function placeBadge(el, badge, rec, reason) {
+    const prev = el.querySelector('.fp-suspect');
+    if (prev && prev !== badge) { try { prev.remove(); } catch (e) {} }
+    let placed = false;
+    // ① 行内：找到正文节点，插在它后面
+    try {
+      const plain = String(rec.message || '').replace(/\s+/g, '');
+      let host = null;
+      for (const len of [10, 8, 6, 4]) {
+        if (plain.length < len) continue;
+        host = findTextHost(el, plain.slice(0, len));
+        if (host) break;
+      }
+      if (host && host.parentNode) {
+        host.insertAdjacentElement('afterend', badge);
+        placed = true;
+      }
+    } catch (e) {}
+    // ② 塞进卡片自己的影子根（能渲染出来）
+    if (!placed) {
+      try {
+        const root = el.shadowRoot || (el.querySelector('bili-comment-renderer') || {}).shadowRoot;
+        if (root) {
+          root.appendChild(badge);
+          placed = true;
+        }
+      } catch (e) {}
+    }
+    // ③ 实在不行，退回 element 本身
+    if (!placed) {
+      try { el.appendChild(badge); placed = true; } catch (e) {}
+    }
+    // 可见性自检：宽高为 0 说明没渲染出来 → 标成"行内"样式再试
+    try {
+      if (!badge.getBoundingClientRect().width) {
+        badge.classList.add('fp-suspect-inline');
+      } else {
+        badge.classList.remove('fp-suspect-inline');
+      }
+    } catch (e) {}
+    injectShadowCSS(badge.getRootNode ? badge.getRootNode() : null);
+    return placed;
+  }
+
   /** 在原评论区那张卡片上挂/更新标记 */
   function decorateSuspect(el) {
     if (!el || el.nodeType !== 1) return;
@@ -1754,20 +1846,21 @@
     const rec = considerData(data);
     if (!rec) return;
     const reason = suspectReason(rec);
-    const existing = el.querySelector('.fp-suspect');
-    if (!reason) { if (existing) existing.remove(); return; }
-    if (existing && existing.dataset.reason === reason) return;
-    injectShadowCSS(el.getRootNode ? el.getRootNode() : null);
-    let badge = existing;
+    let badge = el.querySelector('.fp-suspect') || null;
     if (!badge) {
-      badge = document.createElement('span');
-      badge.className = 'fp-suspect';
-      try { if (!el.style.position || el.style.position === 'static') el.style.position = 'relative'; } catch (e) {}
-      el.appendChild(badge);
+      // 影子根里的旧标记也算
+      try {
+        for (const node of deepQueryAll(el, '.fp-suspect')) { badge = node; break; }
+      } catch (e) {}
     }
-    badge.dataset.reason = reason;
-    badge.textContent = '疑似鱼 · ' + reason;
-    badge.title = '分数 ' + rec.score + '，但' + reason + '，所以没有收进鱼塘';
+    if (!reason) { if (badge) { try { badge.remove(); } catch (e) {} } return; }
+    if (badge && badge.dataset.reason === reason) return;
+    const fresh = document.createElement('span');
+    fresh.className = 'fp-suspect';
+    fresh.dataset.reason = reason;
+    fresh.textContent = '疑似鱼 · ' + reason;
+    fresh.title = '分数 ' + rec.score + '，但' + reason + '，所以没有收进鱼塘';
+    placeBadge(el, fresh, rec, reason);
   }
 
   /** 单张卡片即时判定：命中就当场隐藏（绘制之前） */
