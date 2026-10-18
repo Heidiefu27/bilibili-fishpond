@@ -1,5 +1,10 @@
 # 更新日志
 
+## [2.8.5] — 楼中楼紧排 + 显示 IP 属地
+
+- 楼中楼的每行不再用 flex 把尾部的"时间/赞数"推到最右边，改成自然流排：`昵称 内容 · 时间 · IP属地：X · 👍 n` 紧挨着
+- 楼中楼补上 **IP 属地**（接口 `reply_control.location`，主评论本来就有）
+- 卡片 meta 行的间距从 14px 收到 10px，疑似/赞数不再散开
 ## [2.8.4] — 修 no-oid（沙箱读不到页面全局）
 
 - **根因**：Tampermonkey 沙箱里 `window` 与页面隔离，`window.__INITIAL_STATE__` 读不到 → 取不到 aid → 展开子回复报 `code=no-oid`

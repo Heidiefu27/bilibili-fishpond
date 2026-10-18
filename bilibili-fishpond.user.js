@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         2.8.4
+// @version         2.8.5
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -42,7 +42,7 @@
    * 0. 配置
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '2.8.4';
+  const VERSION = '2.8.5';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -1047,12 +1047,14 @@
     background: rgba(148,158,178,.05); border-radius: 0 6px 6px 0;
     font-size: 12.5px; line-height: 1.7;
   }
-  .fp-reply { display: flex; gap: 6px; align-items: baseline; padding: 2px 0; }
-  .fp-reply-who { color: #00AEEC; flex: 0 0 auto; max-width: 34%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .fp-reply-txt { flex: 1 1 auto; opacity: .85; word-break: break-word; }
-  .fp-reply-meta { flex: 0 0 auto; opacity: .45; font-size: 11.5px; }
+  /* 楼中楼：整行自然流排，不要被 flex 撑开成两头分散 */
+  .fp-reply { padding: 2px 0; line-height: 1.7; }
+  .fp-reply-who { color: #00AEEC; margin-right: 6px; }
+  .fp-reply-txt { opacity: .85; word-break: break-word; }
+  .fp-reply-meta { opacity: .45; font-size: 11.5px; margin-left: 8px; white-space: nowrap; }
+  .fp-reply-meta::before { content: '· '; }
   .fp-reply-more { opacity: .5; font-size: 11.5px; padding-top: 4px; }
-  .fp-meta { margin-top: 6px; font-size: 12px; opacity: .55; display: flex; gap: 14px; flex-wrap: wrap; }
+  .fp-meta { margin-top: 6px; font-size: 12px; opacity: .55; display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; }
 
   .fp-empty { padding: 40px 8px; text-align: center; font-size: 13px; line-height: 2; opacity: .6; }
   .fp-empty b { opacity: 1; font-size: 15px; }
@@ -1431,7 +1433,9 @@
     txt.textContent = r.message;
     const meta = document.createElement('span');
     meta.className = 'fp-reply-meta';
-    meta.textContent = formatTime(r.ctime) + (r.like ? ' · 👍 ' + r.like : '');
+    meta.textContent = formatTime(r.ctime)
+      + (r.location ? ' · IP属地：' + r.location : '')
+      + (r.like ? ' · 👍 ' + r.like : '');
     row.append(who, txt, meta);
     return row;
   }
