@@ -1,5 +1,10 @@
 # 更新日志
 
+## [2.1.2] — 更新源回退到 raw
+
+- `@updateURL` / `@downloadURL` 改回 raw.githubusercontent：jsDelivr 对 `@main` 有约 12 小时缓存，用它做更新检查反而更滞后
+- README 里 jsDelivr 仅作为"安装镜像"列出（国内下载快），并注明可能滞后
+
 ## [2.1.1] — 更新源切换到 jsDelivr
 
 - `@downloadURL` / `@updateURL` 改指向 jsDelivr（`cdn.jsdelivr.net/gh/...@main/...`）：raw.githubusercontent 的 CDN 缓存会滞后十几分钟，导致"检查更新"拿到旧版本
