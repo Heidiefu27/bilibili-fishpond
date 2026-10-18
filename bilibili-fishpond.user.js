@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         2.9.1
+// @version         2.9.2
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -42,7 +42,7 @@
    * 0. 配置
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '2.9.1';
+  const VERSION = '2.9.2';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -1413,7 +1413,7 @@
   }
 
   // 最近一次拉子回复的结果（调试用）
-  const REPLY_FETCH = { code: null, msg: '', url: '', tried: 0 };
+  const REPLY_FETCH = { code: null, msg: '', url: '', tried: 0, variant: '', hasLocation: null };
 
   /** 拉一条评论的楼中楼：三种请求变体依次尝试，失败原因记到 REPLY_FETCH */
   async function fetchReplies(rec, pn) {
@@ -1427,9 +1427,11 @@
       + '&root=' + encodeURIComponent(rec.rpid)
       + '&ps=20&pn=' + (pn || 1);
 
+    // 顺序很重要：B 站只有在**登录态**（请求带 Cookie）时才给子回复返回
+    // reply_control.location。跨域 fetch 默认不带 Cookie，所以必须最先带 credentials
     const variants = [
-      { name: 'plain', url: base, init: undefined },
       { name: 'cred', url: base, init: { credentials: 'include' } },
+      { name: 'plain', url: base, init: undefined },
       { name: 'wbi', url: null, init: { credentials: 'include' } },
     ];
 
@@ -1451,6 +1453,9 @@
         REPLY_FETCH.msg = (json && json.message) || '';
         REPLY_FETCH.url = url.slice(0, 160);
         if (json && json.code === 0) {
+          const withLoc = ((json.data && json.data.replies) || []).filter((r) => r && r.reply_control && r.reply_control.location).length;
+          REPLY_FETCH.hasLocation = withLoc > 0;
+          REPLY_FETCH.variant = v.name;
           walkReplyTree(json, { oid, type, mode: '3' }, 0, true);
           saveCacheSoon();
           if (REPLIES.size > before) return REPLIES.size - before;

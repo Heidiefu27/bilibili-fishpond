@@ -1,5 +1,11 @@
 # 更新日志
 
+## [2.9.2] — 子回复改用带 Cookie 的请求（IP 终于能给）
+
+- 参考「B站评论区开盒」脚本的做法：B 站**登录态**下 `reply_control.location` 在子回复里是存在的，只是原生 UI 不显示
+- 我们之前第一发子回复请求用的是**不带凭据**的跨域 fetch（默认 same-origin），所以拿到的响应没有 IP
+- 现在请求顺序改为：**带 credentials → 不带凭据 → wbi 签名**，登录态下即可拿到 IP
+- `__fishpond.replyFetch()` 增加 `variant` / `hasLocation`，方便确认这次是哪种请求、有没有 IP
 ## [2.9.1] — 楼中楼补 IP 属地
 
 - 实测：`/x/v2/reply/reply` 与 `reply/wbi/reply` 的回复条目里 **没有** `reply_control.location`（7 种参数组合全部为空），B 站自己在楼中楼也不给 IP
