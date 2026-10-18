@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         2.0.0
+// @version         2.0.1
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -41,7 +41,7 @@
    * 0. 配置
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '2.0.0';
+  const VERSION = '2.0.1';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -1199,14 +1199,36 @@
       if (tabEl && tabEl.isConnected) tabEl.remove();
       return;
     }
-    if (tabEl && tabEl.isConnected) { updateTabCount(); updateTabState(); return; }
+    if (tabEl && tabEl.isConnected) {
+      dedupeTabs(tabEl);
+      updateTabCount();
+      updateTabState();
+      return;
+    }
 
     const anchor = findSortAnchor();
-    if (!anchor) return;
+    if (!anchor || !anchor.parentNode) return;
+
+    // 已有页签（另一个脚本实例插的 / tabEl 引用丢了）→ 认领它，别再插一枚
+    const existing = anchor.parentNode.querySelector('.fp-tab');
+    if (existing) {
+      if (existing.querySelector('.fp-tab-count')) {
+        tabEl = existing;
+        dedupeTabs(existing);
+      } else {
+        // 不是本脚本的页签（旧实例 / 别的写法）→ 替换成我们的，保证计数和点击都正常
+        const btn = makeTab();
+        try { existing.replaceWith(btn); } catch (e) { existing.remove(); anchor.insertAdjacentElement('afterend', btn); }
+        tabEl = btn;
+        dedupeTabs(btn);
+      }
+      updateTabCount();
+      updateTabState();
+      return;
+    }
 
     const btn = makeTab();
     try {
-      if (!anchor.parentNode) return;
       injectShadowCSS(anchor.getRootNode());
       anchor.insertAdjacentElement('afterend', btn);
     } catch (e) { warn('插入页签失败', e); return; }
@@ -1217,9 +1239,22 @@
       if (parseFloat(cs.fontSize) > 18) btn.style.fontSize = '14px';
     } catch (e) {}
     tabEl = btn;
+    dedupeTabs(btn);
     updateTabCount();
     updateTabState();
     log('鱼塘页签已插入');
+  }
+
+  /** 同一容器里如果有多枚页签（多个脚本实例），只留第一枚 */
+  function dedupeTabs(keepEl) {
+    try {
+      const parent = keepEl && keepEl.parentNode;
+      if (!parent) return;
+      const all = parent.querySelectorAll('.fp-tab');
+      for (let i = 0; i < all.length; i++) {
+        if (all[i] !== keepEl) all[i].remove();
+      }
+    } catch (e) {}
   }
 
   /* ══════════════════════════════════════════════════════════════
