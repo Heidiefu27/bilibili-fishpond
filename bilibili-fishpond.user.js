@@ -1,9 +1,13 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
-// @namespace       https://github.com/your-name/bilibili-fishpond
+// @namespace       https://github.com/Heidiefu27/bilibili-fishpond
 // @version         1.6.2
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗；支持手动投喂(Alt+点击)、放回、搜索、复制、导出
-// @author          fishpond contributors
+// @author          Heidiefu27
+// @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
+// @supportURL      https://github.com/Heidiefu27/bilibili-fishpond/issues
+// @downloadURL     https://raw.githubusercontent.com/Heidiefu27/bilibili-fishpond/main/bilibili-fishpond.user.js
+// @updateURL       https://raw.githubusercontent.com/Heidiefu27/bilibili-fishpond/main/bilibili-fishpond.user.js
 // @icon            https://www.bilibili.com/favicon.ico
 // @match           *://www.bilibili.com/*
 // @match           *://t.bilibili.com/*

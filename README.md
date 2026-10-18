@@ -1,5 +1,8 @@
 # B站鱼塘 · AI/推广评论收集器
 
+[![test](https://github.com/Heidiefu27/bilibili-fishpond/actions/workflows/test.yml/badge.svg)](https://github.com/Heidiefu27/bilibili-fishpond/actions/workflows/test.yml)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 一个 Tampermonkey 用户脚本：把 B 站评论区里**明显像 AI 生成 / 推广文案**的评论从原评论区里"收走"，集中放到「最热 / 最新」旁边的 **🐟 鱼塘** 页里，并且**就在原评论区的位置**就地切换，不开浮窗、不跳新页面。
 
 > 它不是"关键词黑名单"，而是按**说话腔调**打分：结构、测评口吻、提示腔、功能罗列，再加人味反向分。详见[判定原理](#判定原理)。
@@ -17,11 +20,15 @@
 
 ## 安装
 
-1. 装 [Tampermonkey](https://www.tampermonkey.net/)
-2. 打开 `bilibili-fishpond.user.js`，全选复制，粘到 Tampermonkey 的「新建脚本」里保存
-3. 打开任意视频页，滚到评论区 → 排序条右侧出现 `🐟 鱼塘`
+**一键安装**（需先装好 [Tampermonkey](https://www.tampermonkey.net/)）：
 
-> 也可以直接把 `.user.js` 拖进浏览器窗口，Tampermonkey 会弹出安装页。
+<https://raw.githubusercontent.com/Heidiefu27/bilibili-fishpond/main/bilibili-fishpond.user.js>
+
+在浏览器里打开这个链接，Tampermonkey 会弹出安装页；装完打开任意视频页、滚到评论区，排序条右侧出现 `🐟 鱼塘` 即生效。
+
+手动安装：打开本仓库的 `bilibili-fishpond.user.js` 全选复制，粘到 Tampermonkey 的「新建脚本」里保存即可。
+
+> 脚本头部带 `@updateURL`，以后仓库一更新，Tampermonkey 会自动检查更新。
 
 ## 使用
 
