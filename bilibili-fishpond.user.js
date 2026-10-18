@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         2.5.1
+// @version         2.5.2
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -41,7 +41,7 @@
    * 0. 配置
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '2.5.1';
+  const VERSION = '2.5.2';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -63,6 +63,8 @@
   // 扫描全部评论的上限（防止一条视频扫太久）
   // 本视频 UP 主信息（用于"@ 了 UP 主"的前置排除）
   const VIP = { upMid: '', upName: '' };
+  // 点赞 >= 这个数 → 必定不是鱼（水军的评论基本没人赞）
+  const LIKE_EXEMPT = 5;
 
   // 账号等级按分数算（不是硬排除）：等级低更可疑，等级高只降权，不豁免
   //   0~1 级 +4 / 2~3 级 +2 / 4 级 0 / 5 级 -2 / 6 级 -3
@@ -289,6 +291,9 @@
     const q = splitQuote(rec.message);
     const msg = q.body;
 
+    // 排除：点赞数 ≥ 5（水军评论基本没人赞）
+    if (Number(rec.like) >= LIKE_EXEMPT) return false;
+
     // 排除：这条就是在回复本视频 UP 主
     if (VIP.upName && q.quoteTo && q.quoteTo === VIP.upName) return false;
 
@@ -448,6 +453,7 @@
       message: msg,
       uname: (reply.member && reply.member.uname) || '',
       level: pickLevel(reply),
+      like: Number(reply.like) || 0,
       ats: pickAts(reply) || [],
       score: 0,
       hits: [],
@@ -1949,6 +1955,7 @@
             hasScope: !!scope,
             vip: { upMid: VIP.upMid || detectUp() || '', upName: VIP.upName },
             levelWeights: { '0-1': 4, '2-3': 2, '4': 0, '5': -2, '6': -3 },
+            likeExempt: LIKE_EXEMPT,
             tab: !!(tabEl && tabEl.isConnected),
             scanning,
             anchor: !!findSortAnchor(),
@@ -1962,7 +1969,9 @@
           const o = opts || {};
           const rec = {
             rpid: '__probe__', message: String(t || ''), uname: uname || '',
-            level: Number(o.level) || 0, ats: Array.isArray(o.ats) ? o.ats.map(String) : [],
+            level: Number(o.level) || 0,
+            like: Number(o.like) || 0,
+            ats: Array.isArray(o.ats) ? o.ats.map(String) : [],
             score: 0, hits: [],
           };
           const ev = evaluate(rec);
