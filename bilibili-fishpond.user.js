@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         2.8.5
+// @version         2.9.0
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -42,7 +42,7 @@
    * 0. 配置
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '2.8.5';
+  const VERSION = '2.9.0';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -1049,7 +1049,37 @@
   }
   /* 楼中楼：整行自然流排，不要被 flex 撑开成两头分散 */
   .fp-reply { padding: 2px 0; line-height: 1.7; }
-  .fp-reply-who { color: #00AEEC; margin-right: 6px; }
+  .fp-reply-av {
+    width: 20px; height: 20px; border-radius: 50%; overflow: hidden; flex: 0 0 auto;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: rgba(148,158,178,.2); font-size: 10px; vertical-align: -5px; margin-right: 6px;
+    cursor: pointer;
+  }
+  .fp-reply-av img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .fp-reply-who { color: #00AEEC; margin-right: 6px; text-decoration: none; cursor: pointer; }
+  .fp-uname { text-decoration: none; cursor: pointer; }
+  .fp-ucard {
+    display: none; position: absolute; z-index: 99999;
+    background: #22252B; color: #E3E5E7; border: 1px solid rgba(148,158,178,.25);
+    border-radius: 10px; padding: 14px 16px; box-shadow: 0 10px 30px rgba(0,0,0,.45);
+    font-size: 13px; line-height: 1.6; font-family: inherit;
+  }
+  .fp-ucard-head { display: flex; gap: 12px; align-items: center; }
+  .fp-ucard-face {
+    width: 52px; height: 52px; border-radius: 50%; overflow: hidden; flex: 0 0 auto;
+    background: rgba(148,158,178,.2); display: flex; align-items: center; justify-content: center; font-size: 20px;
+  }
+  .fp-ucard-face img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .fp-ucard-info { min-width: 0; }
+  .fp-ucard-name { font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 6px; }
+  .fp-ucard-stats { opacity: .55; font-size: 12px; margin-top: 2px; }
+  .fp-ucard-btns { display: flex; gap: 8px; margin-top: 12px; }
+  .fp-ucard-btn {
+    flex: 1; text-align: center; padding: 6px 10px; border-radius: 6px; cursor: pointer;
+    background: rgba(148,158,178,.15); color: #E3E5E7; text-decoration: none; font-size: 12.5px;
+  }
+  .fp-ucard-btn.primary { background: #00AEEC; color: #fff; }
+  .fp-ucard-btn:hover { opacity: .85; }
   .fp-reply-txt { opacity: .85; word-break: break-word; }
   .fp-reply-meta { opacity: .45; font-size: 11.5px; margin-left: 8px; white-space: nowrap; }
   .fp-reply-meta::before { content: '· '; }
@@ -1275,6 +1305,8 @@
     el.__scanBtn = scanBtn;
     el.__info = info;
     el.addEventListener('click', onPondClick);
+    el.addEventListener('mouseover', onPondOver);
+    el.addEventListener('mouseleave', () => scheduleHideUserCard());
     return el;
   }
 
@@ -1425,18 +1457,44 @@
   function renderReplyRow(r) {
     const row = document.createElement('div');
     row.className = 'fp-reply';
-    const who = document.createElement('span');
+
+    const av = document.createElement('span');
+    av.className = 'fp-reply-av';
+    const face = normalizeAvatar(r.avatar) || '';
+    if (face) {
+      const img = document.createElement('img');
+      img.src = face;
+      img.referrerPolicy = 'no-referrer';
+      img.addEventListener('error', () => { img.remove(); av.textContent = (r.uname || '?').slice(0, 1); });
+      av.appendChild(img);
+    } else {
+      av.textContent = (r.uname || '?').slice(0, 1);
+    }
+    av.dataset.act = 'user';
+    av.dataset.mid = r.mid || '';
+    av.dataset.rpid = r.rpid || '';
+
+    const who = document.createElement('a');
     who.className = 'fp-reply-who';
     who.textContent = r.uname || '匿名';
+    who.dataset.act = 'user';
+    who.dataset.mid = r.mid || '';
+    who.dataset.rpid = r.rpid || '';
+    who.href = r.mid ? 'https://space.bilibili.com/' + r.mid : 'javascript:void(0)';
+    who.target = '_blank';
+    who.rel = 'noreferrer noopener';
+
     const txt = document.createElement('span');
     txt.className = 'fp-reply-txt';
     txt.textContent = r.message;
+
     const meta = document.createElement('span');
     meta.className = 'fp-reply-meta';
     meta.textContent = formatTime(r.ctime)
       + (r.location ? ' · IP属地：' + r.location : '')
       + (r.like ? ' · 👍 ' + r.like : '');
-    row.append(who, txt, meta);
+
+    row.append(av, who, txt, meta);
     return row;
   }
 
@@ -1505,6 +1563,123 @@
     }
   }
 
+  /* ── 用户卡片：悬停头像/昵称弹出 ── */
+  const USER_CACHE = new Map();
+  let userCardEl = null;
+  let userCardTimer = 0;
+  let userCardFor = '';
+
+  async function fetchUserStats(mid) {
+    const key = String(mid);
+    if (USER_CACHE.has(key)) return USER_CACHE.get(key);
+    const stats = { fans: null, following: null };
+    try {
+      const r = await fetch('https://api.bilibili.com/x/relation/stat?vmid=' + encodeURIComponent(key), { credentials: 'include' });
+      const j = await r.json();
+      if (j && j.code === 0 && j.data) {
+        stats.fans = j.data.follower;
+        stats.following = j.data.following;
+      }
+    } catch (e) {}
+    USER_CACHE.set(key, stats);
+    return stats;
+  }
+
+  function ensureUserCard() {
+    if (userCardEl && userCardEl.isConnected) return userCardEl;
+    userCardEl = document.createElement('div');
+    userCardEl.className = 'fp-ucard';
+    userCardEl.dataset.act = 'ucard';
+    userCardEl.addEventListener('mouseenter', () => { clearTimeout(userCardTimer); });
+    userCardEl.addEventListener('mouseleave', () => { scheduleHideUserCard(); });
+    (pondEl || document.body).appendChild(userCardEl);
+    return userCardEl;
+  }
+
+  function hideUserCard() {
+    if (userCardEl) userCardEl.style.display = 'none';
+    userCardFor = '';
+  }
+
+  function scheduleHideUserCard() {
+    clearTimeout(userCardTimer);
+    userCardTimer = setTimeout(hideUserCard, 220);
+  }
+
+  async function showUserCard(anchorEl, mid, rpid) {
+    const rec = rpid ? REPLIES.get(String(rpid)) : null;
+    const id = String(mid || (rec && rec.mid) || '');
+    if (!id) return;
+    const card = ensureUserCard();
+    userCardFor = id;
+    card.style.display = 'block';
+    card.innerHTML = '';
+    card.dataset.mid = id;
+
+    const uname = (rec && rec.uname) || '用户 ' + id;
+    const faceSrc = normalizeAvatar((rec && rec.avatar) || '') || '';
+
+    const head = document.createElement('div');
+    head.className = 'fp-ucard-head';
+    const face = document.createElement('div');
+    face.className = 'fp-ucard-face';
+    if (faceSrc) { const img = document.createElement('img'); img.src = faceSrc; img.referrerPolicy = 'no-referrer'; face.appendChild(img); }
+    else face.textContent = uname.slice(0, 1);
+    const info = document.createElement('div');
+    info.className = 'fp-ucard-info';
+    const name = document.createElement('div');
+    name.className = 'fp-ucard-name';
+    name.textContent = uname;
+    if (rec && rec.level) {
+      const lv = document.createElement('span');
+      lv.className = 'fp-lv';
+      lv.textContent = 'LV' + rec.level;
+      name.appendChild(lv);
+    }
+    const statsEl = document.createElement('div');
+    statsEl.className = 'fp-ucard-stats';
+    statsEl.textContent = '加载中…';
+    info.append(name, statsEl);
+    head.append(face, info);
+
+    const btns = document.createElement('div');
+    btns.className = 'fp-ucard-btns';
+    const home = document.createElement('a');
+    home.className = 'fp-ucard-btn primary';
+    home.textContent = '个人主页';
+    home.href = 'https://space.bilibili.com/' + id;
+    home.target = '_blank';
+    home.rel = 'noreferrer noopener';
+    const msg = document.createElement('a');
+    msg.className = 'fp-ucard-btn';
+    msg.textContent = '发消息';
+    msg.href = 'https://message.bilibili.com/#/whisper/mid' + id;
+    msg.target = '_blank';
+    msg.rel = 'noreferrer noopener';
+    btns.append(home, msg);
+
+    card.append(head, btns);
+
+    // 定位到触发元素附近
+    try {
+      const r = anchorEl.getBoundingClientRect();
+      const cw = 300;
+      let left = r.left;
+      if (left + cw > window.innerWidth - 12) left = Math.max(12, window.innerWidth - cw - 12);
+      const top = r.bottom + 8 + window.scrollY;
+      card.style.left = Math.round(left + window.scrollX) + 'px';
+      card.style.top = Math.round(top) + 'px';
+      card.style.width = cw + 'px';
+    } catch (e) {}
+
+    const st = await fetchUserStats(id);
+    if (userCardFor !== id) return;
+    const parts = [];
+    if (st.following != null) parts.push(st.following + ' 关注');
+    if (st.fans != null) parts.push(st.fans + ' 粉丝');
+    statsEl.textContent = parts.length ? parts.join(' · ') : '（粉丝数取不到）';
+  }
+
   function renderCard(rec) {
     const card = document.createElement('div');
     card.className = 'fp-card';
@@ -1512,6 +1687,9 @@
 
     const av = document.createElement('div');
     av.className = 'fp-av';
+    av.dataset.act = 'user';
+    av.dataset.mid = rec.mid || '';
+    av.dataset.rpid = rec.rpid || '';
     if (rec.avatar) {
       const img = document.createElement('img');
       img.src = rec.avatar;
@@ -1527,9 +1705,15 @@
 
     const top = document.createElement('div');
     top.className = 'fp-top';
-    const uname = document.createElement('span');
+    const uname = document.createElement('a');
     uname.className = 'fp-uname';
     uname.textContent = rec.uname || '未知用户';
+    uname.dataset.act = 'user';
+    uname.dataset.mid = rec.mid || '';
+    uname.dataset.rpid = rec.rpid || '';
+    uname.href = rec.mid ? 'https://space.bilibili.com/' + rec.mid : 'javascript:void(0)';
+    uname.target = '_blank';
+    uname.rel = 'noreferrer noopener';
     top.appendChild(uname);
     if (rec.level) {
       const lv = document.createElement('span');
@@ -1591,11 +1775,24 @@
     if (n) n.textContent = AI.size;
   }
 
+  function onPondOver(e) {
+    if (!e.target || !e.target.closest) return;
+    const el = e.target.closest('[data-act="user"]');
+    if (!el || !pondEl || !pondEl.contains(el)) return;
+    clearTimeout(userCardTimer);
+    const mid = el.dataset.mid;
+    if (!mid) return;
+    if (userCardFor === String(mid) && userCardEl && userCardEl.style.display === 'block') return;
+    userCardTimer = setTimeout(() => showUserCard(el, mid, el.dataset.rpid), 260);
+  }
+
   function onPondClick(e) {
     const actEl = e.target.closest ? e.target.closest('[data-act]') : null;
     if (!actEl) return;
     const act = actEl.dataset.act;
     if (act === 'exit') { setPond(false); return; }
+    if (act === 'ucard') { return; }
+    if (act === 'user') { return; }
     if (act === 'scan') { scanAll(); return; }
     if (act === 'replies') {
       const id = actEl.dataset.for || (actEl.closest('.fp-card') || {}).dataset && actEl.closest('.fp-card').dataset.rpid;
@@ -1648,6 +1845,7 @@
   }
 
   function setPond(on) {
+    try { hideUserCard(); } catch (e) {}
     if (on === pondOn) return;
     if (on) {
       pondOn = true;
