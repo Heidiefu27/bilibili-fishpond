@@ -3,7 +3,9 @@
 [![test](https://github.com/Heidiefu27/bilibili-fishpond/actions/workflows/test.yml/badge.svg)](https://github.com/Heidiefu27/bilibili-fishpond/actions/workflows/test.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-把 B 站评论区里像 **AI 生成 / 推广文案**的评论从原评论区"收走"，集中放到「最新」旁边的 **🐟 鱼塘** 页——就在原评论区的位置就地切换，不开浮窗。
+把 B 站评论区里像 **AI 生成 / 推广文案**的评论从原评论区"收走"，集中放到「最新」旁边的 **鱼塘** 页——就在原评论区的位置就地切换，不开浮窗。
+
+（页签图标是 DeepSeek 的蓝鲸 logo，已内嵌进脚本，不需要联网加载。）
 
 ![左：原评论区（AI 评论已被收走） / 右：鱼塘页](assets/preview.png)
 
@@ -13,13 +15,13 @@
 
 <https://raw.githubusercontent.com/Heidiefu27/bilibili-fishpond/main/bilibili-fishpond.user.js>
 
-装完打开任意视频页，滚到评论区，排序条右侧出现 `🐟 鱼塘` 即生效。脚本带 `@updateURL`，之后自动更新。
+装完打开任意视频页，滚到评论区，排序条右侧出现蓝鲸图标 + `鱼塘` 即生效。脚本带 `@updateURL`，之后自动更新。
 
 ## 使用
 
 | 操作 | 说明 |
 |---|---|
-| 点 `🐟 鱼塘 N` | 切到鱼塘页，只看被收走的评论 |
+| 点 `鱼塘 N` | 切到鱼塘页，只看被收走的评论 |
 | 点 `最新/最热` 或 `← 回到全部评论` | 切回正常评论区 |
 | 鱼塘页顶部 | 搜索正文/UP主、按分数或时间排序 |
 
