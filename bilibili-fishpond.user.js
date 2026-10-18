@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         2.2.0
+// @version         2.3.0
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -41,7 +41,7 @@
    * 0. 配置
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '2.2.0';
+  const VERSION = '2.3.0';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -61,6 +61,21 @@
   const CFG = Object.assign({}, DEFAULT_CFG);
 
   // 扫描全部评论的上限（防止一条视频扫太久）
+  // 前置排除用：本视频 UP 主 + 高等级账号阈值
+  const VIP_LEVEL = 5;              // 账号等级 ≥ 5 → 必定不是鱼
+  const VIP = { upMid: '', upName: '' };
+
+  function detectUp() {
+    try {
+      const st = window.__INITIAL_STATE__;
+      if (st) {
+        const up = st.upData || (st.videoData && st.videoData.owner) || null;
+        if (up && up.mid) { VIP.upMid = String(up.mid); VIP.upName = String(up.name || ''); }
+      }
+    } catch (e) {}
+    return VIP.upMid;
+  }
+
   const SCAN_MAX_PAGES = 120;      // 最多 120 页（每页 20 条左右）
   const SCAN_MAX_REPLIES = 2400;   // 最多收录 2400 条
   const SCAN_DELAY = 350;          // 每页间隔（毫秒）
@@ -243,10 +258,22 @@
   const NEEDLES = new Map();   // rpid -> 文本 needle（DOM 兜底用）
   const COUNTED = new Set();   // 已扣过“评论 N”的 rpid
 
-  /** 判定：必须有 @ + 分数 ≥ 阈值 */
+  /** 判定：前置排除 → 必须有 @ → 分数 ≥ 阈值 */
   function judge(rec) {
     if (!rec) return false;
-    if (CFG.requireAt && !RE_AT.test(rec.message || '')) return false;
+    const msg = rec.message || '';
+    if (CFG.requireAt && !RE_AT.test(msg)) return false;
+
+    // 排除①：账号等级 ≥ 5 的老号，必定不是这波水军
+    if (rec.level >= VIP_LEVEL) return false;
+
+    // 排除②：@ 的对象就是本视频 UP 主（在跟 UP 对话，不是发推广）
+    const upMid = VIP.upMid || detectUp();
+    if (upMid) {
+      if (Array.isArray(rec.ats) && rec.ats.indexOf(String(upMid)) !== -1) return false;
+      if ((!rec.ats || !rec.ats.length) && VIP.upName && msg.indexOf('@' + VIP.upName) !== -1) return false;
+    }
+
     return rec.score >= Number(CFG.threshold || 6);
   }
 
@@ -283,6 +310,18 @@
   function pickLevel(o) {
     const lv = o && o.member && o.member.level_info && o.member.level_info.current_level;
     return typeof lv === 'number' ? lv : 0;
+  }
+
+  /** 这条评论 @ 了谁（B 站接口在 content.members 里给了 mid） */
+  function pickAts(o) {
+    const arr = o && o.content && o.content.members;
+    if (!Array.isArray(arr)) return null;
+    const out = [];
+    for (const m of arr) {
+      const mid = m && (m.mid || m.mid_str);
+      if (mid) out.push(String(mid));
+    }
+    return out;
   }
 
   function refreshAI(rec) {
@@ -325,6 +364,7 @@
       like: reply.like || 0,
       location: pickLocation(reply) || (prev && prev.location) || '',
       level: pickLevel(reply) || (prev && prev.level) || 0,
+      ats: pickAts(reply) || (prev && prev.ats) || [],
       score: 0,
       hits: [],
     };
@@ -376,6 +416,11 @@
     const msg = (reply.content && reply.content.message) || '';
     if (!rpid || !msg.trim()) return false;
     if (CFG.requireAt && !RE_AT.test(msg)) return false;
+    if (pickLevel(reply) >= VIP_LEVEL) return false;
+    const upMid = VIP.upMid || detectUp();
+    const ats = pickAts(reply) || [];
+    if (upMid && ats.indexOf(String(upMid)) !== -1) return false;
+    if (upMid && !ats.length && VIP.upName && msg.indexOf('@' + VIP.upName) !== -1) return false;
     return scoreComment(msg).score >= Number(CFG.threshold || 6);
   }
 
@@ -385,6 +430,10 @@
     if (!json || typeof json !== 'object') return 0;
     const ctx = parseCtx(url);
     if (ctx.oid) { NET.oid = ctx.oid; NET.type = ctx.type || '1'; }
+    try {
+      const up = json.data && json.data.upper;
+      if (up && up.mid && !VIP.upMid) { VIP.upMid = String(up.mid); if (up.name) VIP.upName = String(up.name); }
+    } catch (e) {}
 
     walkReplyTree(json, ctx, 0, true);   // 第一遍：只登记
 
@@ -1842,6 +1891,7 @@
             domHidden: hiddenCards.size,
             shadowRoots: shadowRoots.size,
             hasScope: !!scope,
+            vip: { level: VIP_LEVEL, upMid: VIP.upMid || detectUp() || '', upName: VIP.upName },
             tab: !!(tabEl && tabEl.isConnected),
             anchor: !!findSortAnchor(),
             pondOn,
@@ -1850,8 +1900,13 @@
         },
         score: (t) => scoreComment(t),
         verdict: (t, uname) => evaluate({ message: t, uname: uname || '' }),
-        check(t, uname) {
-          const rec = { rpid: '__probe__', message: String(t || ''), uname: uname || '', score: 0, hits: [] };
+        check(t, uname, opts) {
+          const o = opts || {};
+          const rec = {
+            rpid: '__probe__', message: String(t || ''), uname: uname || '',
+            level: Number(o.level) || 0, ats: Array.isArray(o.ats) ? o.ats.map(String) : [],
+            score: 0, hits: [],
+          };
           const ev = evaluate(rec);
           rec.score = ev.score;
           rec.hits = ev.hits;
