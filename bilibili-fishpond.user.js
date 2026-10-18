@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         2.8.1
+// @version         2.8.3
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -42,7 +42,7 @@
    * 0. 配置
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '2.8.1';
+  const VERSION = '2.8.3';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -1355,24 +1355,58 @@
     return out;
   }
 
-  /** 拉一条评论的楼中楼（这个接口不需要 wbi 签名） */
+  // 最近一次拉子回复的结果（调试用）
+  const REPLY_FETCH = { code: null, msg: '', url: '', tried: 0 };
+
+  /** 拉一条评论的楼中楼：三种请求变体依次尝试，失败原因记到 REPLY_FETCH */
   async function fetchReplies(rec, pn) {
     const ctx = currentOid();
-    const oid = (rec.oid || (ctx && ctx.oid) || '');
-    const type = rec.type || (ctx && ctx.type) || '1';
-    if (!oid) return 0;
+    const oid = String(rec.oid || (ctx && ctx.oid) || '');
+    const type = String(rec.type || (ctx && ctx.type) || '1');
+    if (!oid) { REPLY_FETCH.code = 'no-oid'; REPLY_FETCH.msg = '缺少 oid'; return 0; }
+
+    const base = 'https://api.bilibili.com/x/v2/reply/reply?type=' + encodeURIComponent(type)
+      + '&oid=' + encodeURIComponent(oid)
+      + '&root=' + encodeURIComponent(rec.rpid)
+      + '&ps=20&pn=' + (pn || 1);
+
+    const variants = [
+      { name: 'plain', url: base, init: undefined },
+      { name: 'cred', url: base, init: { credentials: 'include' } },
+      { name: 'wbi', url: null, init: { credentials: 'include' } },
+    ];
+
+    REPLY_FETCH.tried = 0;
     const before = REPLIES.size;
-    try {
-      const url = 'https://api.bilibili.com/x/v2/reply/reply?type=' + encodeURIComponent(type)
-        + '&oid=' + encodeURIComponent(oid)
-        + '&root=' + encodeURIComponent(rec.rpid)
-        + '&ps=20&pn=' + (pn || 1);
-      const r = await fetch(url, { credentials: 'include' });
-      const json = await r.json();
-      if (!json || json.code !== 0) { warn('子回复接口返回', json && json.code); return 0; }
-      walkReplyTree(json, { oid: String(oid), type: String(type), mode: '3' }, 0, true);
-      saveCacheSoon();
-    } catch (e) { warn('拉取子回复失败', e); }
+    for (const v of variants) {
+      let url = v.url;
+      try {
+        if (!url) {
+          const key = await getWbiKey();
+          url = 'https://api.bilibili.com/x/v2/reply/reply?' + wbiQuery({ type, oid, root: String(rec.rpid), ps: 20, pn: pn || 1 }, key);
+        }
+      } catch (e) { continue; }
+      REPLY_FETCH.tried++;
+      try {
+        const r = await fetch(url, v.init);
+        const json = await r.json();
+        REPLY_FETCH.code = json && json.code;
+        REPLY_FETCH.msg = (json && json.message) || '';
+        REPLY_FETCH.url = url.slice(0, 160);
+        if (json && json.code === 0) {
+          walkReplyTree(json, { oid, type, mode: '3' }, 0, true);
+          saveCacheSoon();
+          if (REPLIES.size > before) return REPLIES.size - before;
+          // code 0 但没有数据：说明这条确实没楼中楼
+          return 0;
+        }
+        warn('子回复接口 [' + v.name + ']', json && json.code, json && json.message);
+      } catch (e) {
+        REPLY_FETCH.code = 'net';
+        REPLY_FETCH.msg = String(e && e.message || e);
+        warn('子回复请求 [' + v.name + '] 失败', e);
+      }
+    }
     return REPLIES.size - before;
   }
 
@@ -1409,7 +1443,9 @@
     if (loading) { box.textContent = '正在加载回复…'; return box; }
     const kids = childrenOf(rec.rpid);
     if (!kids.length) {
-      box.textContent = (rec.rcount ? '（没取到回复，可能已被删除）' : '（暂无回复）');
+      box.textContent = rec.rcount
+        ? '（没取到回复：code=' + REPLY_FETCH.code + (REPLY_FETCH.msg ? ' ' + REPLY_FETCH.msg : '') + '）'
+        : '（暂无回复）';
       return box;
     }
     for (const k of kids.slice(0, 60)) box.appendChild(renderReplyRow(k));
@@ -1519,11 +1555,10 @@
       mr.title = '展开 / 收起回复';
       meta.appendChild(mr);
     }
-    const stags = suspectTags(rec);
-    if (stags.length) {
+    if (isSuspect(rec)) {
       const ms = document.createElement('span');
       ms.className = 'fp-sus';
-      ms.textContent = '疑似 · ' + stags.join(' / ');
+      ms.textContent = '疑似';
       meta.appendChild(ms);
     }
 
@@ -2174,6 +2209,7 @@
         get cfg() { return CFG; },
         get pond() { return [...AI].map((r) => REPLIES.get(r)).filter(Boolean); },
         get scanned() { return [...REPLIES.values()]; },
+        replyFetch: () => ({ ...REPLY_FETCH }),
         diag() {
           const scope = commentScope();
           const cards = scope ? deepQueryAll(scope, 'bili-comment-thread-renderer').length : 0;
