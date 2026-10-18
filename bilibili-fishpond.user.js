@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         2.5.3
+// @version         2.5.4
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -41,7 +41,7 @@
    * 0. 配置
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '2.5.3';
+  const VERSION = '2.5.4';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -970,6 +970,7 @@
     background: rgba(128,136,153,.10); color: inherit; font-family: inherit;
   }
   .fp-mini:hover { border-color: #00AEEC; color: #00AEEC; }
+  .fp-scaninfo { font-size: 11.5px; opacity: .45; padding: 2px 2px 8px; line-height: 1.6; }
 
   .fp-card { display: flex; gap: 12px; padding: 16px 2px; border-bottom: 1px solid rgba(128,136,153,.16); }
   .fp-card:hover { background: rgba(128,136,153,.05); }
@@ -1194,13 +1195,17 @@
 
     bar.append(title, spacer, search, scanBtn, sortBtn, exitBtn);
 
+    const info = document.createElement('div');
+    info.className = 'fp-scaninfo';
+
     pondListEl = document.createElement('div');
     pondListEl.className = 'fp-pond-list';
 
-    el.append(bar, pondListEl);
+    el.append(bar, info, pondListEl);
     el.__title = title;
     el.__sortBtn = sortBtn;
     el.__scanBtn = scanBtn;
+    el.__info = info;
     el.addEventListener('click', onPondClick);
     return el;
   }
@@ -1222,12 +1227,44 @@
     return out;
   }
 
+  /** 统计：扫到多少、收了多少、各条规则各放过了多少（用于鱼塘页那行说明） */
+  let scanTotalSeen = 0;
+  function summarize() {
+    const out = { total: REPLIES.size, pond: AI.size, like: 0, reply: 0, atup: 0, noat: 0, low: 0, apiTotal: scanTotal || 0 };
+    const upMid = VIP.upMid || detectUp();
+    for (const [, rec] of REPLIES) {
+      if (AI.has(rec.rpid)) continue;
+      const q = /^\s*回复\s*@\s*([^\s:：]{1,24})\s*[:：]\s*/.exec(rec.message || '');
+      const body = q ? rec.message.slice(q[0].length) : (rec.message || '');
+      if (Number(rec.like) >= LIKE_EXEMPT) { out.like++; continue; }
+      if (Number(rec.rcount) > 0) { out.reply++; continue; }
+      if (upMid && ((rec.ats || []).indexOf(String(upMid)) !== -1 || (VIP.upName && body.indexOf('@' + VIP.upName) !== -1))) { out.atup++; continue; }
+      if (CFG.requireAt && !RE_AT.test(body)) { out.noat++; continue; }
+      out.low++;
+    }
+    return out;
+  }
+
   function renderPond(force) {
     if (!pondEl || !pondListEl) return;
     updatePondTitle();
-    const sig = AI.size + '|' + REPLIES.size + '|' + searchKW + '|' + CFG.sort;
+    const sig = AI.size + '|' + REPLIES.size + '|' + searchKW + '|' + CFG.sort + '|' + (scanTotal || 0);
     if (!force && sig === pondSig) return;
     pondSig = sig;
+
+    if (pondEl.__info) {
+      const st = summarize();
+      const parts = ['扫到 ' + st.total + ' 条'];
+      if (st.apiTotal && st.total < st.apiTotal * 0.8) parts.push('（该视频共 ' + st.apiTotal + ' 条，接口只给了这些，点「扫全部」可再试）');
+      parts.push('鱼塘 ' + st.pond);
+      const ex = [];
+      if (st.like) ex.push('赞≥' + LIKE_EXEMPT + ' 放过 ' + st.like);
+      if (st.reply) ex.push('有回复放过 ' + st.reply);
+      if (st.atup) ex.push('@UP 放过 ' + st.atup);
+      if (st.noat) ex.push('没@ 放过 ' + st.noat);
+      if (ex.length) parts.push(ex.join(' · '));
+      pondEl.__info.textContent = parts.join(' · ');
+    }
 
     const list = currentList();
     const frag = document.createDocumentFragment();
