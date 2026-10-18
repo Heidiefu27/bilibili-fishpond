@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         2.3.1
+// @version         2.4.0
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -41,7 +41,7 @@
    * 0. 配置
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '2.3.1';
+  const VERSION = '2.4.0';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -61,9 +61,19 @@
   const CFG = Object.assign({}, DEFAULT_CFG);
 
   // 扫描全部评论的上限（防止一条视频扫太久）
-  // 前置排除用：本视频 UP 主 + 高等级账号阈值
-  const VIP_LEVEL = 4;              // 账号等级 ≥ 4 → 必定不是鱼
+  // 本视频 UP 主信息（用于"@ 了 UP 主"的前置排除）
   const VIP = { upMid: '', upName: '' };
+
+  // 账号等级按分数算（不是硬排除）：等级低更可疑，等级高只降权，不豁免
+  //   0~1 级 +4 / 2~3 级 +2 / 4 级 0 / 5 级 -2 / 6 级 -3
+  function levelHits(level) {
+    const lv = Number(level) || 0;
+    if (lv <= 1) return { w: 4, name: '低等级号(LV' + lv + ')' };
+    if (lv <= 3) return { w: 2, name: '等级偏低(LV' + lv + ')' };
+    if (lv === 4) return null;
+    if (lv === 5) return { w: -2, name: 'LV5 老号' };
+    return { w: -3, name: 'LV6 老号' };
+  }
 
   function detectUp() {
     try {
@@ -236,6 +246,10 @@
     if (uniq.size >= 3) { score += 2; hits.push({ w: 2, name: 'DSH/插件话题' }); }
     else if (/DSH|DeepSeek/i.test(msg)) { score += 1; hits.push({ w: 1, name: '提到 DSH' }); }
 
+    // 账号等级：低等级加分、高等级减分（高等级仍然可能被收）
+    const lh = levelHits(rec.level);
+    if (lh) { score += lh.w; hits.push(lh); }
+
     // 安利式 @人：@某人 + 推荐/好评词 + 毫无口语痕迹
     if (RE_AT.test(msg)
       && /(推荐|试试|好用|流畅|方便|顺手|装上|装了|值得|不错)/.test(msg)
@@ -258,16 +272,13 @@
   const NEEDLES = new Map();   // rpid -> 文本 needle（DOM 兜底用）
   const COUNTED = new Set();   // 已扣过“评论 N”的 rpid
 
-  /** 判定：前置排除 → 必须有 @ → 分数 ≥ 阈值 */
+  /** 判定：必须有 @ → @ 的不是本视频 UP → 分数 ≥ 阈值（等级只算分，不排除） */
   function judge(rec) {
     if (!rec) return false;
     const msg = rec.message || '';
     if (CFG.requireAt && !RE_AT.test(msg)) return false;
 
-    // 排除①：账号等级 ≥ 4 的老号，必定不是这波水军
-    if (rec.level >= VIP_LEVEL) return false;
-
-    // 排除②：@ 的对象就是本视频 UP 主（在跟 UP 对话，不是发推广）
+    // 排除：@ 的对象就是本视频 UP 主（在跟 UP 对话，不是发推广）
     const upMid = VIP.upMid || detectUp();
     if (upMid) {
       if (Array.isArray(rec.ats) && rec.ats.indexOf(String(upMid)) !== -1) return false;
@@ -415,13 +426,19 @@
     const rpid = String(reply.rpid || reply.rpid_str || '');
     const msg = (reply.content && reply.content.message) || '';
     if (!rpid || !msg.trim()) return false;
-    if (CFG.requireAt && !RE_AT.test(msg)) return false;
-    if (pickLevel(reply) >= VIP_LEVEL) return false;
-    const upMid = VIP.upMid || detectUp();
-    const ats = pickAts(reply) || [];
-    if (upMid && ats.indexOf(String(upMid)) !== -1) return false;
-    if (upMid && !ats.length && VIP.upName && msg.indexOf('@' + VIP.upName) !== -1) return false;
-    return scoreComment(msg).score >= Number(CFG.threshold || 6);
+    const probe = {
+      rpid,
+      message: msg,
+      uname: (reply.member && reply.member.uname) || '',
+      level: pickLevel(reply),
+      ats: pickAts(reply) || [],
+      score: 0,
+      hits: [],
+    };
+    const ev = evaluate(probe);
+    probe.score = ev.score;
+    probe.hits = ev.hits;
+    return judge(probe);
   }
 
   const NET = { seen: 0, pruned: 0, urls: new Set(), byMode: {}, oid: '', type: '1' };
@@ -1891,7 +1908,8 @@
             domHidden: hiddenCards.size,
             shadowRoots: shadowRoots.size,
             hasScope: !!scope,
-            vip: { level: VIP_LEVEL, upMid: VIP.upMid || detectUp() || '', upName: VIP.upName },
+            vip: { upMid: VIP.upMid || detectUp() || '', upName: VIP.upName },
+            levelWeights: { '0-1': 4, '2-3': 2, '4': 0, '5': -2, '6': -3 },
             tab: !!(tabEl && tabEl.isConnected),
             anchor: !!findSortAnchor(),
             pondOn,
