@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         3.0.1
+// @version         3.1.1
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -42,7 +42,7 @@
    * 0. 配置
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '3.0.1';
+  const VERSION = '3.1.1';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -999,6 +999,10 @@
     font-size: 11px; line-height: 16px; padding: 0 7px; border-radius: 8px;
     background: rgba(248,90,84,.14); color: #F85A54; font-weight: 700;
   }
+  .fp-emote {
+    height: 1.35em; width: auto; vertical-align: -0.25em;
+    display: inline-block; margin: 0 1px;
+  }
   .fp-text { font-size: 14px; line-height: 1.72; white-space: pre-wrap; word-break: break-word; }
   .fp-text.clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; overflow: hidden; }
   .fp-sus { color: #F85A54; }
@@ -1263,6 +1267,9 @@
     if (!force && sig === pondSig) return;
     pondSig = sig;
 
+    const before = EMOTE_MAP.size;
+    harvestEmotes();
+    if (EMOTE_MAP.size > before) fetchEmotePanel();
     const list = currentList();
     const frag = document.createDocumentFragment();
     if (!list.length) {
@@ -1392,7 +1399,7 @@
 
     const txt = document.createElement('span');
     txt.className = 'fp-reply-txt';
-    txt.textContent = r.message;
+    txt.appendChild(messageNode(r.message));
 
     const meta = document.createElement('span');
     meta.className = 'fp-reply-meta';
@@ -1588,6 +1595,99 @@
     statsEl.textContent = parts.length ? parts.join(' · ') : '（粉丝数取不到）';
   }
 
+  /* ── B 站表情：把 [doge] 这类文字换成图片 ── */
+  const EMOTE_MAP = new Map();   // '[doge]' -> 图片地址
+  let emoteFetching = false;
+  const EMOTE_KEY = 'fishpond:emotes';
+  let emoteSaveTimer = 0;
+
+  function loadEmotes() {
+    try {
+      const obj = store.get(EMOTE_KEY, null);
+      if (obj && typeof obj === 'object') {
+        for (const k of Object.keys(obj)) if (obj[k]) EMOTE_MAP.set(k, obj[k]);
+      }
+    } catch (e) {}
+  }
+
+  function saveEmotesSoon() {
+    clearTimeout(emoteSaveTimer);
+    emoteSaveTimer = setTimeout(() => {
+      try {
+        const obj = {};
+        let n = 0;
+        for (const [k, v] of EMOTE_MAP) { obj[k] = v; if (++n >= 500) break; }
+        store.set(EMOTE_KEY, obj);
+      } catch (e) {}
+    }, 1500);
+  }
+
+  /** 从页面已渲染的原生评论里捡表情图（alt 或 title 里带 [xxx]） */
+  function harvestEmotes(root) {
+    let got = 0;
+    const scan = (node) => {
+      if (!node || !node.querySelectorAll) return;
+      let imgs = [];
+      try { imgs = node.querySelectorAll('img'); } catch (e) { imgs = []; }
+      for (const img of imgs) {
+        const key = (img.getAttribute('alt') || img.getAttribute('title') || '').trim();
+        if (!/^\[[^\[\]]{1,12}\]$/.test(key)) continue;
+        const src = img.currentSrc || img.src || '';
+        if (!src || !/hdslb.com/.test(src)) continue;
+        if (EMOTE_MAP.get(key) === src) continue;
+        EMOTE_MAP.set(key, src);
+        got++;
+      }
+    };
+    try { scan(root || commentScope() || document); } catch (e) {}
+    for (const sr of shadowRoots) { try { scan(sr); } catch (e) {} }
+    if (got) saveEmotesSoon();
+    return got;
+  }
+
+  /** 登录态下拉一次表情面板，补齐页面还没出现过的表情 */
+  async function fetchEmotePanel() {
+    if (emoteFetching || EMOTE_MAP.size > 400) return;
+    emoteFetching = true;
+    try {
+      const r = await fetch('https://api.bilibili.com/x/emote/user/panel/web?business=reply', { credentials: 'include' });
+      const j = await r.json();
+      const pkgs = (j && j.data && j.data.packages) || [];
+      for (const pk of pkgs) {
+        for (const em of (pk.emote || [])) {
+          const text = em && em.text;
+          const url = em && (em.gif_url || em.url);
+          if (text && url) EMOTE_MAP.set(String(text), String(url).replace(/^http:/, 'https:'));
+        }
+      }
+    } catch (e) {} finally { emoteFetching = false; }
+  }
+
+  const EMOTE_RE = /(\[[^\[\]]{1,12}\])/g;
+
+  /** 把带 [doge] 的正文渲染成 fragment（已知表情出图，未知保留文字） */
+  function messageNode(text) {
+    const frag = document.createDocumentFragment();
+    const raw = String(text || '');
+    const parts = raw.split(EMOTE_RE);
+    for (const part of parts) {
+      if (!part) continue;
+      const src = EMOTE_MAP.get(part);
+      if (src && /^\[[^\[\]]{1,12}\]$/.test(part)) {
+        const img = document.createElement('img');
+        img.className = 'fp-emote';
+        img.src = src;
+        img.alt = part;
+        img.draggable = false;
+        img.referrerPolicy = 'no-referrer';
+        frag.appendChild(img);
+      } else {
+        frag.appendChild(document.createTextNode(part));
+      }
+    }
+    return frag;
+  }
+
   function renderCard(rec) {
     const card = document.createElement('div');
     card.className = 'fp-card';
@@ -1636,7 +1736,7 @@
 
     const text = document.createElement('div');
     text.className = 'fp-text';
-    text.textContent = rec.message;
+    text.appendChild(messageNode(rec.message));
 
     const meta = document.createElement('div');
     meta.className = 'fp-meta';
@@ -2204,7 +2304,7 @@
       for (const c of inner) hideIfAI(c);
     }
     if (!commentScope()) return;
-    if (isCardEl(node)) hideIfAI(node);
+    if (isCardEl(node)) { hideIfAI(node); harvestEmotes(node); }
     if (!node.querySelectorAll) return;
     let cards = [];
     try { cards = node.querySelectorAll(CARD_SELECTOR); } catch (e) { cards = []; }
@@ -2297,6 +2397,7 @@
   }
 
   function boot() {
+    try { loadEmotes(); harvestEmotes(); fetchEmotePanel(); } catch (e) {}
     injectCSS();
     loadCache();
     startObserver();
@@ -2376,6 +2477,7 @@
           return { score: ev.score, hits: ev.hits, at: RE_AT.test(rec.message), ai: judge(rec) };
         },
         scan: () => scanAll(),
+        emotes: () => ({ count: EMOTE_MAP.size, sample: [...EMOTE_MAP.keys()].slice(0, 12) }),
         open: () => setPond(true),
         close: () => setPond(false),
       };
