@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         2.5.2
+// @version         2.5.3
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -41,7 +41,7 @@
    * 0. 配置
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '2.5.2';
+  const VERSION = '2.5.3';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -294,6 +294,9 @@
     // 排除：点赞数 ≥ 5（水军评论基本没人赞）
     if (Number(rec.like) >= LIKE_EXEMPT) return false;
 
+    // 排除：这条评论有子回复（真人在讨论，水军评论没人回）
+    if (Number(rec.rcount) > 0) return false;
+
     // 排除：这条就是在回复本视频 UP 主
     if (VIP.upName && q.quoteTo && q.quoteTo === VIP.upName) return false;
 
@@ -395,6 +398,7 @@
       avatar: normalizeAvatar(member.avatar) || (prev && prev.avatar) || '',
       ctime: reply.ctime || (prev && prev.ctime) || 0,
       like: reply.like || 0,
+      rcount: Number(reply.rcount != null ? reply.rcount : reply.count) || 0,
       location: pickLocation(reply) || (prev && prev.location) || '',
       level: pickLevel(reply) || (prev && prev.level) || 0,
       ats: pickAts(reply) || (prev && prev.ats) || [],
@@ -454,6 +458,7 @@
       uname: (reply.member && reply.member.uname) || '',
       level: pickLevel(reply),
       like: Number(reply.like) || 0,
+      rcount: Number(reply.rcount != null ? reply.rcount : reply.count) || 0,
       ats: pickAts(reply) || [],
       score: 0,
       hits: [],
@@ -1971,6 +1976,7 @@
             rpid: '__probe__', message: String(t || ''), uname: uname || '',
             level: Number(o.level) || 0,
             like: Number(o.like) || 0,
+            rcount: Number(o.rcount) || 0,
             ats: Array.isArray(o.ats) ? o.ats.map(String) : [],
             score: 0, hits: [],
           };
