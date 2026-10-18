@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         2.6.1
+// @version         2.6.2
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -16,6 +16,7 @@
 // @grant           GM_getValue
 // @grant           GM_setValue
 // @grant           GM_deleteValue
+// @grant           unsafeWindow
 // @noframes
 // @license         MIT
 // ==/UserScript==
@@ -41,7 +42,7 @@
    * 0. 配置
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '2.6.1';
+  const VERSION = '2.6.2';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -1794,10 +1795,9 @@
 
   /** 把标记真正显示出来：优先插到正文后面的行内位置，失败则塞进影子根并绝对定位 */
   function placeBadge(el, badge, rec, reason) {
-    const prev = el.querySelector('.fp-suspect');
-    if (prev && prev !== badge) { try { prev.remove(); } catch (e) {} }
     let placed = false;
-    // ① 行内：找到正文节点，插在它后面
+
+    // ① 行内：找到这条评论的正文节点，把标记插在它后面（最贴近"评论旁"）
     try {
       const plain = String(rec.message || '').replace(/\s+/g, '');
       let host = null;
@@ -1807,33 +1807,33 @@
         if (host) break;
       }
       if (host && host.parentNode) {
+        badge.classList.add('fp-suspect-inline');
         host.insertAdjacentElement('afterend', badge);
         placed = true;
+        // 行内版若被容器裁掉（宽高为 0），退回到绝对定位方案
+        try {
+          if (!badge.getBoundingClientRect().width) { badge.remove(); placed = false; }
+        } catch (e) {}
       }
-    } catch (e) {}
-    // ② 塞进卡片自己的影子根（能渲染出来）
+    } catch (e) { placed = false; }
+
+    // ② 绝对定位：塞进卡片自己的影子根（一定能渲染）
     if (!placed) {
       try {
+        badge.classList.remove('fp-suspect-inline');
+        const cs = getComputedStyle(el);
+        if (!cs || cs.position === 'static') el.style.position = 'relative';
         const root = el.shadowRoot || (el.querySelector('bili-comment-renderer') || {}).shadowRoot;
-        if (root) {
-          root.appendChild(badge);
-          placed = true;
-        }
+        if (root) { root.appendChild(badge); placed = true; }
       } catch (e) {}
     }
-    // ③ 实在不行，退回 element 本身
+
+    // ③ 最后退回卡片本身
     if (!placed) {
       try { el.appendChild(badge); placed = true; } catch (e) {}
     }
-    // 可见性自检：宽高为 0 说明没渲染出来 → 标成"行内"样式再试
-    try {
-      if (!badge.getBoundingClientRect().width) {
-        badge.classList.add('fp-suspect-inline');
-      } else {
-        badge.classList.remove('fp-suspect-inline');
-      }
-    } catch (e) {}
-    injectShadowCSS(badge.getRootNode ? badge.getRootNode() : null);
+
+    try { injectShadowCSS(badge.getRootNode ? badge.getRootNode() : null); } catch (e) {}
     return placed;
   }
 
@@ -2129,9 +2129,11 @@
 
     log('已启动 v' + VERSION + ' · 阈值 ' + CFG.threshold + '（必须有 @）');
 
-    // 调试入口（只读）
+    // 调试入口（只读）。Tampermonkey 沙箱里 window 是隔离的，
+    // 必须挂到 unsafeWindow 才能在页面控制台访问到
     try {
-      window.__fishpond = {
+      const PAGE_WIN = (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window;
+      PAGE_WIN.__fishpond = {
         version: VERSION,
         get cfg() { return CFG; },
         get pond() { return [...AI].map((r) => REPLIES.get(r)).filter(Boolean); },

@@ -93,6 +93,8 @@
 __fishpond.diag()                  // 钩子/拦截/剔除/页签状态
 __fishpond.scanned                 // 本页扫到的评论（含分数）
 __fishpond.check('文本','昵称')     // 对一段文本跑完整判定
+__fishpond.judge('rpid')            // 看某条评论的最终判定
+__fishpond.diag()                   // 扫描/过滤/UP 主等状态
 ```
 
 ## 开发

@@ -1,5 +1,11 @@
 # 更新日志
 
+## [2.6.2] — 调试入口挂到 unsafeWindow + 标记放置再加固
+
+- 修复控制台 `__fishpond is not defined`：Tampermonkey 沙箱下 window 是隔离的，现在把调试对象挂到 `unsafeWindow`（新增 `@grant unsafeWindow`）
+- 标记放置逻辑重写：
+  - 行内方案若被容器裁掉（宽高为 0）会回退到绝对定位，并给卡片补 `position: relative`
+  - 绝对定位优先塞进卡片自己的影子根，保证能渲染
 ## [2.6.1] — 标记真的能看见了 + 水军互捧仍算鱼
 
 - 修复"疑似鱼"标记看不见：原来挂在自定义元素的 light DOM 上，而 B 站评论区内容都在 shadow root 里渲染，没有 slot 就把标签吞了
