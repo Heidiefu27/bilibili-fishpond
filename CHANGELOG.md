@@ -1,5 +1,10 @@
 # 更新日志
 
+## [2.6.3] — 疑似清单调试入口
+
+- 新增 `__fishpond.suspects()`：列出所有"疑似鱼但没收录"的评论（rpid/赞/回复数/分数/原因/是否已渲染/标记是否可见）
+- 扫描结束后自动给已渲染的卡片补一次标
+
 ## [2.6.2] — 调试入口挂到 unsafeWindow + 标记放置再加固
 
 - 修复控制台 `__fishpond is not defined`：Tampermonkey 沙箱下 window 是隔离的，现在把调试对象挂到 `unsafeWindow`（新增 `@grant unsafeWindow`）

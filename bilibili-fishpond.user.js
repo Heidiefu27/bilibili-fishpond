@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         2.6.2
+// @version         2.6.3
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -42,7 +42,7 @@
    * 0. 配置
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '2.6.2';
+  const VERSION = '2.6.3';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -752,6 +752,11 @@
       saveCacheSoon();
       renderPond(true);
       updateTabCount();
+      try {
+        for (const th of deepQueryAll(commentScope() || document, 'bili-comment-thread-renderer')) {
+          if (th.__data) decorateSuspect(th);
+        }
+      } catch (e) {}
       if (pondEl && pondEl.__scanBtn) pondEl.__scanBtn.textContent = '扫全部';
       toast(added ? '扫描完成：新增 ' + added + ' 条（鱼塘 ' + AI.size + ' 条）' : '扫描完成：没有新增');
     }
@@ -2166,6 +2171,30 @@
           };
         },
         judge(rpid) { const r = REPLIES.get(String(rpid)); return r ? judge(r) : null; },
+        /** 列出所有"疑似鱼但没收录"的评论，以及它在页面里有没有打上标 */
+        suspects() {
+          const out = [];
+          for (const [, rec] of REPLIES) {
+            const reason = suspectReason(rec);
+            if (!reason) continue;
+            let inDom = false, visible = false;
+            try {
+              const cards = deepQueryAll(commentScope() || document, 'bili-comment-thread-renderer');
+              for (const c of cards) {
+                const d = c.__data;
+                if (d && String(d.rpid || d.rpid_str) === String(rec.rpid)) {
+                  inDom = true;
+                  const b = (c.shadowRoot && c.shadowRoot.querySelector('.fp-suspect'))
+                    || deepQueryOne(c, '.fp-suspect');
+                  if (b) visible = b.getBoundingClientRect().width > 0;
+                  break;
+                }
+              }
+            } catch (e) {}
+            out.push({ rpid: rec.rpid, uname: rec.uname, score: rec.score, like: rec.like, rcount: rec.rcount, reason, inDom, visible });
+          }
+          return out.sort((a, b) => b.score - a.score);
+        },
         score: (t) => scoreComment(t),
         verdict: (t, uname) => evaluate({ message: t, uname: uname || '' }),
         check(t, uname, opts) {
