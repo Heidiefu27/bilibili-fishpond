@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            B站鱼塘 · AI评论收集器
 // @namespace       https://github.com/Heidiefu27/bilibili-fishpond
-// @version         3.1.2
+// @version         3.2.1
 // @description     把评论区里“明显AI生成/推广文案”的评论从原评论区收走，集中放进“最热/最新”旁边的【鱼塘】页；就在原评论区位置就地切换，不开浮窗
 // @author          Heidiefu27
 // @homepageURL     https://github.com/Heidiefu27/bilibili-fishpond
@@ -42,7 +42,7 @@
    * 0. 配置
    * ══════════════════════════════════════════════════════════════ */
 
-  const VERSION = '3.1.2';
+  const VERSION = '3.2.1';
   const TAG = '%c[鱼塘]';
   const TAG_CSS = 'color:#00AEEC;font-weight:700';
   const log = (...a) => { try { console.log(TAG, TAG_CSS, ...a); } catch (e) {} };
@@ -84,8 +84,8 @@
     if (lv <= 1) return { w: 4, name: '低等级号(LV' + lv + ')' };
     if (lv <= 3) return { w: 2, name: '等级偏低(LV' + lv + ')' };
     if (lv === 4) return null;
-    if (lv === 5) return { w: -2, name: 'LV5 老号' };
-    return { w: -3, name: 'LV6 老号' };
+    if (lv === 5) return { w: -1, name: 'LV5 老号' };
+    return { w: -2, name: 'LV6 老号' };
   }
 
   function detectUp() {
@@ -161,6 +161,7 @@
     const has = (re) => re.test(s);
     const n = s.length;
     if (!n) return { score: 0, hits: [] };
+    const hasAt = /@\s*[^\s@]{1,24}/.test(s);
 
     /* ---------- 标点 / 结构 ---------- */
     const semi = cnt(/[；;]/g);
@@ -210,6 +211,21 @@
     const conn = cnt(/(此外|另外|同时|因此|而且|并且|然而|首先|其次|最后|进而|从而|不过|实际上|总体)/g);
     if (conn >= 2) add(2, '书面连接词' + conn + '处');
 
+    /* ---------- 工具圈推广特征（DSH / 模型圈 水军高频） ---------- */
+    const SPEC = /(base\s*url|api|端点|接口|中转|转发|限流|并发|配额|授权|部署|自建|镜像|github|仓库|模型名|参数|token|云端|本地跑|离线)/gi;
+    const specCnt = (s.match(SPEC) || []).length;
+    if (specCnt >= 3) add(3, '技术词堆砌×' + Math.min(specCnt, 9));
+    else if (specCnt >= 2) add(1, '技术词×2');
+
+    const QUOTA = /(免费\s*\d|\d\s*(万|亿)\s*(token|tokens|个字)|\d+\s*(块|元|块钱)|白嫖|先冲|额度|送\s*\d)/i;
+    if (QUOTA.test(s)) add(2, '额度/价格');
+
+    const GUIDE = /(建议(补|加|先|你)|补一句|记得(手动|先|去)|先.{0,8}再|别忘了|注意一下|不然会)/;
+    // 带 @ 的短句还夹带"福利/免费/冲" → 水军拉新典型写法
+    const WELFARE = /(免费|白嫖|薅|福利|白给|先冲|冲为敬|额度|送\s*\d|领)/;
+    if (hasAt && n < 40 && WELFARE.test(s)) add(4, '@人+福利短句');
+    if (GUIDE.test(s)) add(2, '指导腔');
+
     /* ---------- 推广结构 ---------- */
     const ability = cnt(/(能|可以|支持|还能|都能|全在|都在)/g);
     if (ability >= 2) add(dun >= 2 ? 3 : 2, dun >= 2 ? '功能罗列腔' : '功能罗列');
@@ -223,13 +239,14 @@
     const humanMarks = [];
     const anti = (w, name) => { add(w, name); humanMarks.push(name); };
     if (/\[[^\[\]]{1,8}\]/.test(s)) anti(-4, 'B站表情');
-    if (/(哈{2,}|笑死|233+|awsl|泪目|离谱|卧槽|淦|狗头|前排|沙发|插眼|蹲|救命|破防|绷不住|绝了|好家伙|哭了|乐死|难崩|这波|我愿称)/.test(s)) anti(-4, '口语/梗');
+    if (/(哈{2,}|笑死|233+|awsl|泪目|离谱|卧槽|淦|狗头|前排|沙发|插眼|蹲|救命|破防|绷不住|绝了|好家伙|哭了|乐死|难崩|这波|我愿称)/.test(s)) anti(-2, '口语/梗');
     if (cnt(/(啊|吧|呀|呢|嘛|啦|嗷|诶|欸|嗯)/g) >= 2) anti(-3, '语气词多');
     if (/(我|咱)/.test(s) && /(感觉|刚才|昨天|试了|卡了|坑了|用着|在家|上班|折腾|踩过)/.test(s)) anti(-2, '个人叙事');
     if (/(有没有|咋|怎么破|啥|请问|求解|大佬|佬|求问|救命)/.test(s)) anti(-2, '求助/口语问法');
     if (/(感谢|谢谢|辛苦|三连|码住|收藏了|学到了)/.test(s)) anti(-2, '感谢/礼貌词');
     if (/(.)\1{2,}/.test(s)) anti(-2, '叠字/复读');
-    if (n < 25) anti(-6, '太短');
+    // 带 @ 的短句是水军常见形态（"@某人 免费1M先冲为敬"），不按"太短"重罚
+    if (n < 25) anti(hasAt ? -2 : -6, hasAt ? '短评(带@)' : '太短');
 
     /* ---------- 无人味加成 ---------- */
     if (comma >= 2 && n >= 35 && humanMarks.length === 0 && !/(我|咱|俺)/.test(s)) add(3, '无任何人味特征');
@@ -999,6 +1016,7 @@
     font-size: 11px; line-height: 16px; padding: 0 7px; border-radius: 8px;
     background: rgba(248,90,84,.14); color: #F85A54; font-weight: 700;
   }
+  .fp-at { color: #00AEEC; }
   .fp-emote {
     height: 1.35em; width: auto; vertical-align: -0.25em;
     display: inline-block; margin: 0 1px;
@@ -1681,7 +1699,19 @@
         img.referrerPolicy = 'no-referrer';
         frag.appendChild(img);
       } else {
-        frag.appendChild(document.createTextNode(part));
+        // @某某 高亮（水军评论的重点特征）
+        const segs = part.split(/(@[^\s@:：,，。]{1,24})/g);
+        for (const seg of segs) {
+          if (!seg) continue;
+          if (seg.charAt(0) === '@' && seg.length > 1) {
+            const at = document.createElement('span');
+            at.className = 'fp-at';
+            at.textContent = seg;
+            frag.appendChild(at);
+          } else {
+            frag.appendChild(document.createTextNode(seg));
+          }
+        }
       }
     }
     return frag;
@@ -1930,7 +1960,6 @@
           if (data && data.length <= 12 && n.parentElement) {
             if (data === '最新' || data === '按时间' || data === '最新发布') target.latest.push(n.parentElement);
             else if (data === '最热' || data === '按热度' || data === '最多点赞' || data === '最多回复') target.hot.push(n.parentElement);
-            else if (data.includes('最新')) target.latest.push(n.parentElement);
           }
           n = walker.nextNode();
         }
@@ -1950,10 +1979,28 @@
     }
     if (!latest.length && !hot.length) {
       for (const sr of shadowRoots) scanTexts(sr, target);
-      if (!latest.length && !hot.length) scanTexts(document.documentElement, target);
+      // 不再扫整个 document：页面里到处都是"最新"两个字（UP 签名、推荐位……），
+      // 一旦兜底扫全页就会把页签插到评论区外面
     }
 
-    const pick = (list) => list.filter((el) => el && el.isConnected && el.parentNode && !insideCommentCard(el));
+    // 候选元素必须处在评论/回复相关的容器里（防止插到 UP 签名、推荐位等位置）
+    const isCommentish = (el) => {
+      let node = el;
+      let guard = 0;
+      while (node && guard++ < 10) {
+        const tag = String(node.tagName || '').toLowerCase();
+        const cls = String(node.className || '').toLowerCase();
+        if (/comment|reply/.test(tag)) return true;
+        if (/comment|reply|header|sort|tab/.test(cls)) return true;
+        node = node.parentElement || (node.getRootNode && node.getRootNode().host) || null;
+      }
+      return false;
+    };
+
+    const pick = (list) => list.filter((el) => el
+      && el.isConnected && el.parentNode
+      && !insideCommentCard(el)
+      && isCommentish(el));
 
     let cands = pick(latest);
     if (!cands.length) cands = pick(hot);
@@ -1961,6 +2008,14 @@
 
     const exact = cands.filter((el) => SORT_LABELS[(el.textContent || '').trim()]);
     if (exact.length) cands = exact;
+
+    // 优先选和"最热"在同一个排序行里的那个，进一步排除同名文本
+    const paired = cands.filter((el) => {
+      const par = el.parentNode;
+      const t = (par && par.textContent) || '';
+      return /最热|热门|最多/.test(t) && /最新|按时间/.test(t);
+    });
+    if (paired.length) cands = paired;
 
     cands.sort((a, b) => deepest(b, scope) - deepest(a, scope));
 
@@ -2067,6 +2122,13 @@
     try {
       injectShadowCSS(anchor.getRootNode());
       anchor.insertAdjacentElement('afterend', btn);
+      // 清掉之前插错位置的页签（比如插到了 UP 主签名旁边）
+      try {
+        const home = anchor.parentNode;
+        for (const t of deepQueryAll(commentScope() || document, '.fp-tab')) {
+          if (t && t !== btn && t.parentNode !== home) t.remove();
+        }
+      } catch (e) {}
     } catch (e) { warn('插入页签失败', e); return; }
     try {
       const cs = getComputedStyle(anchor);
